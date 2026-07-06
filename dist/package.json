@@ -1,0 +1,17 @@
+{
+		"version": "1.0.0.0",
+		"author": {"name":"Laive","email":"soporte@example.com"},
+		"resources": [
+			{
+				"resourceId": "rId0",
+				"sourceType": 5,
+				"file": "resources/dataView127EB9251AAD488D9E734D9E0DCFE354.pbiviz.json"
+			}
+		],
+		"visual": {"name":"dataView","displayName":"DataView Diagnostics","guid":"dataView127EB9251AAD488D9E734D9E0DCFE354","visualClassName":"Visual","version":"1.0.0.0","description":"Minimal diagnostic visual for multiple dataViewMappings.","supportUrl":"https://example.com/support","gitHubUrl":""},
+		"metadata": {
+			"pbivizjson": {
+				"resourceId": "rId0"
+			}
+		}
+	}

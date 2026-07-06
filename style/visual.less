@@ -1,0 +1,79 @@
+.data-view-diagnostic {
+    box-sizing: border-box;
+    color: #1f1f1f;
+    font-family: "Segoe UI", Arial, sans-serif;
+    font-size: 12px;
+    height: 100%;
+    overflow: auto;
+    padding: 12px;
+    width: 100%;
+
+    h2 {
+        font-size: 16px;
+        font-weight: 600;
+        margin: 0 0 8px;
+    }
+
+    p {
+        margin: 0 0 12px;
+    }
+
+    .metric-list {
+        display: grid;
+        grid-template-columns: max-content 1fr;
+        margin: 0 0 12px;
+        row-gap: 4px;
+    }
+
+    dt {
+        font-weight: 600;
+        margin: 0;
+        padding-right: 12px;
+    }
+
+    dd {
+        margin: 0;
+    }
+
+    .fetch-more-button {
+        background: #f7f7f7;
+        border: 1px solid #8a8a8a;
+        color: #1f1f1f;
+        cursor: pointer;
+        font-family: inherit;
+        font-size: 12px;
+        margin: 0 0 12px;
+        padding: 6px 10px;
+    }
+
+    .fetch-more-button:hover {
+        background: #eeeeee;
+    }
+
+    table {
+        border-collapse: collapse;
+        margin-bottom: 12px;
+        table-layout: fixed;
+        width: 100%;
+    }
+
+    th,
+    td {
+        border: 1px solid #d0d0d0;
+        padding: 6px 8px;
+        text-align: left;
+        vertical-align: top;
+        word-break: break-word;
+    }
+
+    th {
+        background: #f3f3f3;
+        font-weight: 600;
+    }
+
+    .summary-total-row td {
+        background: #eeeeee;
+        border-top: 2px solid #8a8a8a;
+        font-weight: 600;
+    }
+}
