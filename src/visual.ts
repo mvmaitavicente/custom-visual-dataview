@@ -4,6 +4,10 @@
 
 import powerbi from "powerbi-visuals-api";
 import { FormattingSettingsService } from "powerbi-visuals-utils-formattingmodel";
+import * as L from "leaflet";
+import type { Feature, FeatureCollection, Geometry } from "geojson";
+import peruRegionGeoJson from "./../Departamento_Region.light.json";
+import "leaflet/dist/leaflet.css";
 import "./../style/visual.less";
 
 import DataView = powerbi.DataView;
@@ -19,8 +23,9 @@ import VisualUpdateOptions = powerbi.extensibility.visual.VisualUpdateOptions;
 import { VisualFormattingSettingsModel } from "./settings";
 
 type RiskLevel = "Bajo" | "Medio" | "Alto" | "Muy Alto";
+type RiskMapView = "Total" | RiskLevel;
 
-const riskLevels: RiskLevel[] = ["Bajo", "Medio", "Alto", "Muy Alto"];
+const riskMapViews: RiskMapView[] = ["Total", "Bajo", "Medio", "Alto", "Muy Alto"];
 
 interface ColumnIndexes {
     region: number;
@@ -80,54 +85,20 @@ interface RiskSetBuckets {
     muyAlto: Set<string>;
 }
 
-interface MapRegionShape {
-    name: string;
-    path: string;
-    labelX: number;
-    labelY: number;
-}
-
 interface RegionAggregate {
     region: string;
     totalColegios: number;
+    totalProvincias: number;
     montoInversion: number;
     estudiantesBeneficiarios: number;
     numeroSolicitudes: number;
-    risk: RiskLevel;
-    predominantRisk: RiskLevel;
-    weightedRisk: RiskLevel;
-    weightedScore: number;
     riskBreakdown: RiskBuckets;
 }
 
-const peruRegionShapes: MapRegionShape[] = [
-    { name: "TUMBES", path: "M120 45 L190 52 L180 95 L115 88 Z", labelX: 150, labelY: 72 },
-    { name: "PIURA", path: "M100 92 L205 98 L218 170 L168 196 L112 170 Z", labelX: 158, labelY: 142 },
-    { name: "LAMBAYEQUE", path: "M126 180 L205 178 L210 225 L135 230 Z", labelX: 170, labelY: 205 },
-    { name: "CAJAMARCA", path: "M210 105 L305 115 L318 230 L214 225 L205 170 Z", labelX: 265, labelY: 170 },
-    { name: "AMAZONAS", path: "M315 92 L430 115 L405 245 L318 230 L305 115 Z", labelX: 370, labelY: 170 },
-    { name: "LORETO", path: "M430 80 L760 130 L790 320 L650 395 L520 345 L405 245 Z", labelX: 615, labelY: 235 },
-    { name: "LA LIBERTAD", path: "M145 230 L250 232 L264 310 L170 318 Z", labelX: 205, labelY: 274 },
-    { name: "SAN MARTIN", path: "M325 235 L420 252 L445 390 L338 375 L264 310 Z", labelX: 370, labelY: 315 },
-    { name: "ANCASH", path: "M172 318 L280 314 L305 405 L220 440 L175 390 Z", labelX: 235, labelY: 375 },
-    { name: "HUANUCO", path: "M305 405 L338 375 L452 395 L460 505 L345 510 Z", labelX: 390, labelY: 450 },
-    { name: "UCAYALI", path: "M460 505 L452 395 L650 395 L705 595 L565 655 Z", labelX: 570, labelY: 520 },
-    { name: "PASCO", path: "M345 510 L460 505 L475 575 L370 590 Z", labelX: 415, labelY: 548 },
-    { name: "LIMA PROVINCIAS", path: "M220 440 L345 510 L370 590 L318 660 L225 585 Z", labelX: 285, labelY: 555 },
-    { name: "LIMA METROPOLITANA", path: "M212 590 L246 600 L238 635 L205 625 Z", labelX: 226, labelY: 615 },
-    { name: "CALLAO", path: "M190 600 L210 604 L205 628 L185 622 Z", labelX: 198, labelY: 616 },
-    { name: "JUNIN", path: "M370 590 L475 575 L510 675 L400 710 L318 660 Z", labelX: 425, labelY: 642 },
-    { name: "MADRE DE DIOS", path: "M650 600 L790 560 L842 705 L700 740 L565 655 Z", labelX: 710, labelY: 660 },
-    { name: "CUSCO", path: "M510 675 L565 655 L700 740 L642 860 L500 802 Z", labelX: 595, labelY: 750 },
-    { name: "HUANCAVELICA", path: "M290 662 L400 710 L392 790 L290 760 Z", labelX: 340, labelY: 735 },
-    { name: "ICA", path: "M225 585 L290 662 L290 760 L240 790 L192 700 Z", labelX: 250, labelY: 695 },
-    { name: "AYACUCHO", path: "M392 790 L400 710 L500 802 L470 900 L360 858 Z", labelX: 430, labelY: 810 },
-    { name: "APURIMAC", path: "M470 900 L500 802 L595 868 L550 940 Z", labelX: 520, labelY: 880 },
-    { name: "AREQUIPA", path: "M240 790 L360 858 L470 900 L428 1040 L275 980 Z", labelX: 350, labelY: 930 },
-    { name: "PUNO", path: "M595 868 L642 860 L742 980 L660 1090 L550 940 Z", labelX: 635, labelY: 950 },
-    { name: "MOQUEGUA", path: "M428 1040 L550 940 L575 1035 L500 1100 Z", labelX: 500, labelY: 1018 },
-    { name: "TACNA", path: "M500 1100 L575 1035 L660 1090 L610 1160 L510 1165 Z", labelX: 570, labelY: 1120 }
-];
+interface MapHeatScale {
+    maxTotalColegios: number;
+    riskHeatScores: Map<string, number>;
+}
 
 interface MetricBucket {
     key: string;
@@ -185,8 +156,6 @@ interface BucketSummary {
     alto: number;
     muyAlto: number;
     porcentajeCritico: number;
-    scoreRiesgo: number;
-    clasificacion: RiskLevel;
 }
 
 interface RiskLevelSummary extends BucketSummary {
@@ -279,6 +248,22 @@ interface UnitKpiCell {
     value: string;
 }
 
+type InternalFilterKey = "region" | "provincia" | "distrito" | "codigoLocal" | "nombreLocal";
+
+interface InternalFilters {
+    region: string;
+    provincia: string;
+    distrito: string;
+    codigoLocal: string;
+    nombreLocal: string;
+}
+
+interface InternalFilterDefinition {
+    key: InternalFilterKey;
+    label: string;
+    placeholder: string;
+}
+
 interface UnitDetailRow {
     unit: UnitKpiName;
     codigoLocal: string;
@@ -306,6 +291,52 @@ interface DetailColumn {
 interface RegionTooltipSummary {
     colegios: number;
     provincias: number;
+}
+
+type MapDrillMode = "provincias" | "distritos" | "colegios";
+
+interface MapPointSummary {
+    key: string;
+    label: string;
+    count: number;
+    lat: number;
+    lng: number;
+    riskBreakdown: RiskBuckets;
+}
+
+interface SchoolCluster {
+    key: string;
+    count: number;
+    lat: number;
+    lng: number;
+    labels: string[];
+    riskBreakdown: RiskBuckets;
+}
+
+interface MapPointAccumulator {
+    key: string;
+    label: string;
+    regionKey: string;
+    count: number;
+    latTotal: number;
+    lngTotal: number;
+    riskBreakdown: RiskBuckets;
+}
+
+interface SchoolPointIndex {
+    regionKey: string;
+    label: string;
+    lat: number;
+    lng: number;
+    riskLevel: string;
+}
+
+interface StreamingVisualIndexes {
+    regionAnalytics: Map<string, AnalyticsEngine>;
+    provinciaPoints: Map<string, MapPointAccumulator>;
+    distritoPoints: Map<string, MapPointAccumulator>;
+    schoolPoints: SchoolPointIndex[];
+    detailRowsByUnit: Map<UnitKpiName, Map<string, UnitDetailRow>>;
 }
 
 const ugmeGrupoOrder = [
@@ -390,8 +421,6 @@ interface TableDiagnostics {
     hasTable: boolean;
     columnIndexes: ColumnIndexes;
     columns: DataViewMetadataColumn[];
-    rows: DataViewTableRow[];
-    records: SourceRecord[];
     segmentFilas: number;
     accumulatedFilas: number;
     hasMoreData: boolean;
@@ -405,38 +434,70 @@ interface TableDiagnostics {
     performanceMetrics: PerformanceMetrics;
 }
 
+interface AnalyticsCacheEntry {
+    analytics: AnalyticsEngine;
+    datasetSignature: string;
+    rowCount: number;
+    lastUsed: number;
+}
+
 function measure<T>(label: string, fn: () => T): { value: T; ms: number } {
     const start = performance.now();
     const value = fn();
     const end = performance.now();
-    console.log(`${label} ms`, end - start);
     return { value, ms: end - start };
 }
 
-function getRiskRatioColor(ratio: number): string {
-    if (!Number.isFinite(ratio) || ratio < 0) {
-        return "#d1d5db";
+function getRiskHeatColor(ratio: number): string {
+    if (!Number.isFinite(ratio) || ratio <= 0) {
+        return "#e5e7eb";
     }
 
     const clamped = Math.max(0, Math.min(1, ratio));
 
-    if (clamped <= 0.2) {
-        return "#86efac";
+    if (clamped <= 0.25) {
+        return "#22c55e";
     }
 
-    if (clamped <= 0.4) {
-        return "#d9f99d";
+    if (clamped <= 0.5) {
+        return "#facc15";
     }
 
-    if (clamped <= 0.6) {
-        return "#fde68a";
-    }
-
-    if (clamped <= 0.8) {
-        return "#fdba74";
+    if (clamped <= 0.75) {
+        return "#fb923c";
     }
 
     return "#ef4444";
+}
+
+function getRiskGradientColor(score: number): string {
+    if (!Number.isFinite(score) || score < 0) {
+        return "#e5e7eb";
+    }
+
+    const stops = [
+        { at: 0, color: [187, 247, 208] },
+        { at: 0.32, color: [190, 242, 100] },
+        { at: 0.55, color: [253, 224, 71] },
+        { at: 0.78, color: [251, 146, 60] },
+        { at: 1, color: [239, 68, 68] }
+    ];
+    const clamped = Math.max(0, Math.min(1, score));
+
+    for (let index = 1; index < stops.length; index += 1) {
+        const previous = stops[index - 1];
+        const next = stops[index];
+
+        if (clamped <= next.at) {
+            const localRatio = (clamped - previous.at) / (next.at - previous.at);
+            const color = previous.color.map((channel: number, channelIndex: number) => (
+                Math.round(channel + (next.color[channelIndex] - channel) * localRatio)
+            ));
+            return `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
+        }
+    }
+
+    return "rgb(239, 68, 68)";
 }
 
 class AnalyticsEngine {
@@ -453,8 +514,19 @@ class AnalyticsEngine {
         this.result = result;
     }
 
-    public static build(records: SourceRecord[]): AnalyticsEngine {
-        const result = AnalyticsEngine.createResult();
+    public static build(records: Iterable<SourceRecord>): AnalyticsEngine {
+        const engine = AnalyticsEngine.createEmpty();
+        engine.addRecords(records);
+        engine.finalizeBuild();
+
+        return engine;
+    }
+
+    public static createEmpty(): AnalyticsEngine {
+        return new AnalyticsEngine(AnalyticsEngine.createResult());
+    }
+
+    public addRecords(records: Iterable<SourceRecord>): void {
         let flatIndexesMs = 0;
         let relationIndexesMs = 0;
 
@@ -462,38 +534,38 @@ class AnalyticsEngine {
             const recordKeys = AnalyticsEngine.getRecordKeys(record);
 
             const flatStart = performance.now();
-            AnalyticsEngine.updateBucket(result.totals, recordKeys, record);
-            AnalyticsEngine.updateMapBucket(result.byRegion, recordKeys.regionKey, recordKeys.regionLabel, recordKeys, record);
-            AnalyticsEngine.updateMapBucket(result.byProvincia, recordKeys.provinciaKey, recordKeys.provinciaLabel, recordKeys, record);
-            AnalyticsEngine.updateMapBucket(result.byDistrito, recordKeys.distritoKey, recordKeys.distritoLabel, recordKeys, record);
-            AnalyticsEngine.updateMapBucket(result.byUnidad, recordKeys.unidadKey, recordKeys.unidadLabel, recordKeys, record);
-            AnalyticsEngine.updateMapBucket(result.byEstado, recordKeys.estadoKey, recordKeys.estadoLabel, recordKeys, record);
-            AnalyticsEngine.updateMapBucket(result.byRiesgo, recordKeys.riesgoKey, recordKeys.riesgoLabel, recordKeys, record);
-            AnalyticsEngine.updateMapBucket(result.byColegio, recordKeys.colegioKey, recordKeys.colegioLabel, recordKeys, record);
-            AnalyticsEngine.updateUnitKpiBucket(result.byUnidadKpi, record);
+            AnalyticsEngine.updateBucket(this.result.totals, recordKeys, record);
+            AnalyticsEngine.updateMapBucket(this.result.byRegion, recordKeys.regionKey, recordKeys.regionLabel, recordKeys, record);
+            AnalyticsEngine.updateMapBucket(this.result.byProvincia, recordKeys.provinciaKey, recordKeys.provinciaLabel, recordKeys, record);
+            AnalyticsEngine.updateMapBucket(this.result.byDistrito, recordKeys.distritoKey, recordKeys.distritoLabel, recordKeys, record);
+            AnalyticsEngine.updateMapBucket(this.result.byUnidad, recordKeys.unidadKey, recordKeys.unidadLabel, recordKeys, record);
+            AnalyticsEngine.updateMapBucket(this.result.byEstado, recordKeys.estadoKey, recordKeys.estadoLabel, recordKeys, record);
+            AnalyticsEngine.updateMapBucket(this.result.byRiesgo, recordKeys.riesgoKey, recordKeys.riesgoLabel, recordKeys, record);
+            AnalyticsEngine.updateMapBucket(this.result.byColegio, recordKeys.colegioKey, recordKeys.colegioLabel, recordKeys, record);
+            AnalyticsEngine.updateUnitKpiBucket(this.result.byUnidadKpi, record);
             flatIndexesMs += performance.now() - flatStart;
 
             const relationStart = performance.now();
-            AnalyticsEngine.addRelation(result.provinciasByRegion, recordKeys.regionKey, recordKeys.provinciaKey);
-            AnalyticsEngine.addRelation(result.distritosByProvincia, recordKeys.provinciaKey, recordKeys.distritoKey);
-            AnalyticsEngine.addRelation(result.colegiosByDistrito, recordKeys.distritoKey, recordKeys.colegioKey);
+            AnalyticsEngine.addRelation(this.result.provinciasByRegion, recordKeys.regionKey, recordKeys.provinciaKey);
+            AnalyticsEngine.addRelation(this.result.distritosByProvincia, recordKeys.provinciaKey, recordKeys.distritoKey);
+            AnalyticsEngine.addRelation(this.result.colegiosByDistrito, recordKeys.distritoKey, recordKeys.colegioKey);
             relationIndexesMs += performance.now() - relationStart;
         }
 
-        const engine = new AnalyticsEngine(result);
-        engine.flatIndexesMs = flatIndexesMs;
-        engine.relationIndexesMs = relationIndexesMs;
-        engine.buildFlatSummaries();
-        engine.measureLazySampleQuery();
+        this.flatIndexesMs += flatIndexesMs;
+        this.relationIndexesMs += relationIndexesMs;
+    }
 
-        return engine;
+    public finalizeBuild(): void {
+        this.buildFlatSummaries();
+        this.lazySampleQueryMs = 0;
     }
 
     public buildFlatSummaries(): void {
         this.regionSummaries = this.mapToSummaries(this.result.byRegion, "region");
         this.unitSummaries = this.mapToSummaries(this.result.byUnidad);
-        this.stateSummaries = this.mapToSummaries(this.result.byEstado);
-        this.riskSummaries = this.buildRiskSummaries();
+        this.stateSummaries = [];
+        this.riskSummaries = [];
     }
 
     public getResult(): AnalyticsResult {
@@ -529,10 +601,18 @@ class AnalyticsEngine {
     }
 
     public getEstados(): BucketSummary[] {
+        if (!this.stateSummaries.length && this.result.byEstado.size) {
+            this.stateSummaries = this.mapToSummaries(this.result.byEstado);
+        }
+
         return this.stateSummaries;
     }
 
     public getRiesgos(): RiskLevelSummary[] {
+        if (!this.riskSummaries.length && this.result.byRiesgo.size) {
+            this.riskSummaries = this.buildRiskSummaries();
+        }
+
         return this.riskSummaries;
     }
 
@@ -970,8 +1050,6 @@ class AnalyticsEngine {
     }
 
     private bucketToSummary(bucket: MetricBucket, level?: SummaryLevel): BucketSummary {
-        const scoreRiesgo = this.getRiskScore(bucket);
-
         return {
             key: bucket.key,
             label: bucket.label,
@@ -996,9 +1074,7 @@ class AnalyticsEngine {
             medio: bucket.riesgo.medio,
             alto: bucket.riesgo.alto,
             muyAlto: bucket.riesgo.muyAlto,
-            porcentajeCritico: this.getCriticalPercent(bucket),
-            scoreRiesgo,
-            clasificacion: this.classifyRisk(scoreRiesgo)
+            porcentajeCritico: this.getCriticalPercent(bucket)
         };
     }
 
@@ -1018,37 +1094,6 @@ class AnalyticsEngine {
         }
 
         return "Bajo";
-    }
-
-    private classifyRisk(score: number): RiskLevel {
-        if (score < 1.75) {
-            return "Bajo";
-        }
-
-        if (score < 2.5) {
-            return "Medio";
-        }
-
-        if (score < 3.25) {
-            return "Alto";
-        }
-
-        return "Muy Alto";
-    }
-
-    private getRiskScore(bucket: MetricBucket): number {
-        const totalRiesgo = this.getRiskTotal(bucket);
-
-        if (!totalRiesgo) {
-            return 0;
-        }
-
-        return (
-            bucket.riesgo.bajo +
-            bucket.riesgo.medio * 2 +
-            bucket.riesgo.alto * 3 +
-            bucket.riesgo.muyAlto * 4
-        ) / totalRiesgo;
     }
 
     private getCriticalPercent(bucket: MetricBucket): number {
@@ -1198,20 +1243,43 @@ export class Visual implements IVisual {
     private target: HTMLElement;
     private accumulatedRows: SourceRecord[] = [];
     private accumulatedRowKeys: Set<string> = new Set<string>();
+    private streamingIndexes: StreamingVisualIndexes = this.createStreamingIndexes();
     private lastFetchClickTime?: number;
     private isFetching = false;
     private allDataLoaded = false;
     private accumulatedRowCount = 0;
     private fetchCount = 0;
     private analyticsCache: AnalyticsEngine | null = null;
+    private incrementalAnalytics: AnalyticsEngine | null = null;
+    private analyticsCacheBySignature: Map<string, AnalyticsCacheEntry> = new Map<string, AnalyticsCacheEntry>();
+    private selectedRegionAnalyticsCache: AnalyticsEngine | null = null;
+    private selectedRegionAnalyticsCacheKey = "";
     private lastDatasetSignature = "";
     private lastIncomingDataSignature = "";
+    private lastAccumulatedIncomingSignature = "";
+    private lastColumnSignature = "";
     private segmentLoadStartTime?: number;
     private updateCount = 0;
+    private cacheUseSequence = 0;
     private currentView: VisualView = "summary";
-    private selectedRiskView: RiskLevel = "Alto";
+    private selectedRiskView: RiskMapView = "Total";
+    private mapRankingLimit = 26;
     private selectedRegion: string | null = null;
-    private warnedMissingRegionMatches: Set<string> = new Set<string>();
+    private internalFilters: InternalFilters = {
+        region: "",
+        provincia: "",
+        distrito: "",
+        codigoLocal: "",
+        nombreLocal: ""
+    };
+    private openInternalFilter: InternalFilterKey | null = null;
+    private internalFilterAnalyticsCache: Map<string, AnalyticsEngine> = new Map<string, AnalyticsEngine>();
+    private autoFocusedRegion: string | null = null;
+    private suppressedAutoFocusSignature = "";
+    private leafletMap: L.Map | null = null;
+    private activeMapDrillLayer: L.LayerGroup | null = null;
+    private activeMapDrillKey = "";
+    private mapContextMenu: HTMLElement | null = null;
     private latestDiagnostics: TableDiagnostics | null = null;
     private detailModalUnit: UnitKpiName | null = null;
     private isDetailModalOpen = false;
@@ -1219,6 +1287,14 @@ export class Visual implements IVisual {
     private detailPage = 1;
     private detailPageSize = 20;
     private detailCacheByUnit: Map<string, UnitDetailRow[]> = new Map<string, UnitDetailRow[]>();
+    private readonly maxAnalyticsCacheEntries = 4;
+    private readonly maxDetailCacheEntries = 1;
+    private readonly enableAnalyticsCache = false;
+    private readonly enableInterimLoadingRender = false;
+    private readonly enableSelectedRegionCache = false;
+    private readonly enableSegmentAutoFetch = true;
+    private readonly useCurrentDataViewOnly = false;
+    private readonly enableRuntimeLogs = false;
     private formattingSettings: VisualFormattingSettingsModel = new VisualFormattingSettingsModel();
     private formattingSettingsService: FormattingSettingsService;
     private handleKeydown = (event: KeyboardEvent): void => {
@@ -1236,6 +1312,7 @@ export class Visual implements IVisual {
     }
 
     public destroy(): void {
+        this.removeLeafletMap();
         window.removeEventListener("keydown", this.handleKeydown);
     }
 
@@ -1247,6 +1324,30 @@ export class Visual implements IVisual {
             : undefined;
         this.lastFetchClickTime = undefined;
 
+        if (this.canReuseDiagnosticsForResize(options)) {
+            const diagnostics = this.latestDiagnostics as TableDiagnostics;
+            const renderStart = performance.now();
+            diagnostics.performanceMetrics.analyticsCacheHit = true;
+            diagnostics.performanceMetrics.analyticsRebuilt = false;
+            diagnostics.performanceMetrics.buildRecordsMs = 0;
+            diagnostics.performanceMetrics.accumulateRowsMs = 0;
+            diagnostics.performanceMetrics.buildAnalyticsEngineMs = 0;
+            this.render(diagnostics);
+            diagnostics.performanceMetrics.renderMs = performance.now() - renderStart;
+            diagnostics.performanceMetrics.updateTotalMs = performance.now() - updateStart;
+            diagnostics.performanceMetrics.rowsPerSecond = this.calculateProcessingRate(
+                diagnostics.accumulatedFilas,
+                diagnostics.performanceMetrics.updateTotalMs
+            );
+            diagnostics.performanceMetrics.msPer10kRows = this.calculateMsPer10k(
+                diagnostics.accumulatedFilas,
+                diagnostics.performanceMetrics.updateTotalMs
+            );
+            this.updatePerformancePanel(diagnostics);
+            this.updatePerformanceMini(diagnostics);
+            return;
+        }
+
         const dataViews: DataView[] = options.dataViews || [];
         const dataView = dataViews[0];
 
@@ -1257,7 +1358,7 @@ export class Visual implements IVisual {
             );
         }
 
-        const diagnostics = this.buildDiagnostics(dataViews, fetchWaitMs);
+        const diagnostics = this.buildDiagnostics(dataViews, fetchWaitMs, options.operationKind);
         this.latestDiagnostics = diagnostics;
 
         const renderStart = performance.now();
@@ -1274,8 +1375,6 @@ export class Visual implements IVisual {
         );
         this.updatePerformancePanel(diagnostics);
         this.updatePerformanceMini(diagnostics);
-        this.logDiagnostics(diagnostics);
-        console.table(diagnostics.performanceMetrics);
     }
 
     private renderCurrentView(): void {
@@ -1284,11 +1383,26 @@ export class Visual implements IVisual {
         }
     }
 
+    private canReuseDiagnosticsForResize(options: VisualUpdateOptions): boolean {
+        const updateType = options.type || 0;
+        const resizeType = powerbi.VisualUpdateType.Resize;
+        const isResizeOnly = updateType === resizeType;
+
+        return isResizeOnly &&
+            !!this.latestDiagnostics &&
+            !this.latestDiagnostics.isLoading &&
+            !!this.latestDiagnostics.analytics;
+    }
+
     public getFormattingModel(): powerbi.visuals.FormattingModel {
         return this.formattingSettingsService.buildFormattingModel(this.formattingSettings);
     }
 
-    private buildDiagnostics(dataViews: DataView[], fetchWaitMs?: number): TableDiagnostics {
+    private buildDiagnostics(
+        dataViews: DataView[],
+        fetchWaitMs?: number,
+        operationKind?: powerbi.VisualDataChangeOperationKind
+    ): TableDiagnostics {
         const performanceMetrics: PerformanceMetrics = {
             updateTotalMs: 0,
             segmentLoadMs: 0,
@@ -1338,16 +1452,28 @@ export class Visual implements IVisual {
         performanceMetrics.buildRecordsMs = buildRecordsResult.ms;
 
         const records = buildRecordsResult.value;
-        this.resetAccumulationIfDatasetChanged(records, columns, hasMoreData);
+        const datasetChanged = this.resetAccumulationIfDatasetChanged(records, columns, hasMoreData, operationKind);
 
-        const accumulateResult = measure("accumulateRows", () => this.accumulateRecords(records));
+        const incomingDataSignature = this.lastIncomingDataSignature;
+        const accumulateResult = measure("accumulateRows", () => this.accumulateRecords(records, hasMoreData, incomingDataSignature));
         performanceMetrics.accumulateRowsMs = accumulateResult.ms;
-        this.accumulatedRowCount = this.accumulatedRows.length;
+        this.accumulatedRowCount = this.accumulatedRowCount || records.length;
+        this.logDataFlow("after-accumulate", {
+            hasMoreData,
+            datasetChanged,
+            segmentRows: records.length,
+            accumulatedRows: this.accumulatedRowCount,
+            isFetching: this.isFetching,
+            allDataLoaded: this.allDataLoaded,
+            operationKind,
+            incomingSignature: incomingDataSignature,
+            lastDatasetSignature: this.lastDatasetSignature
+        });
         if (this.isFetching && fetchWaitMs !== undefined) {
             this.isFetching = false;
         }
 
-        if (hasMoreData) {
+        if (hasMoreData && this.enableSegmentAutoFetch) {
             this.allDataLoaded = false;
             if (this.segmentLoadStartTime === undefined) {
                 this.segmentLoadStartTime = performance.now();
@@ -1357,12 +1483,7 @@ export class Visual implements IVisual {
                 this.isFetching = true;
                 this.fetchCount += 1;
                 this.lastFetchClickTime = performance.now();
-                const accepted = this.host.fetchMoreData();
-                console.log("fetchMoreData automatic requested", {
-                    accepted,
-                    fetchCount: this.fetchCount,
-                    accumulatedRows: this.accumulatedRowCount
-                });
+                this.host.fetchMoreData();
             }
 
             performanceMetrics.fetchCount = this.fetchCount;
@@ -1370,23 +1491,35 @@ export class Visual implements IVisual {
                 ? 0
                 : performance.now() - this.segmentLoadStartTime;
 
+            const interimAnalyticsResult = this.enableInterimLoadingRender && datasetChanged && this.accumulatedRowCount
+                ? measure("buildInterimAnalyticsEngine", () => this.incrementalAnalytics || AnalyticsEngine.build(this.accumulatedRows))
+                : null;
+            const interimAnalytics = interimAnalyticsResult?.value || null;
+            if (interimAnalyticsResult) {
+                performanceMetrics.buildAnalyticsEngineMs = interimAnalyticsResult.ms;
+                performanceMetrics.analyticsRebuilt = true;
+
+                const buildMetrics = interimAnalyticsResult.value.getBuildMetrics();
+                performanceMetrics.buildFlatIndexesMs = buildMetrics.buildFlatIndexesMs;
+                performanceMetrics.buildRelationIndexesMs = buildMetrics.buildRelationIndexesMs;
+                performanceMetrics.lazySampleQueryMs = buildMetrics.lazySampleQueryMs;
+            }
+
             return {
                 dataViewCount: dataViews.length,
                 hasTable: !!table,
                 columnIndexes,
                 columns,
-                rows,
-                records,
                 segmentFilas: records.length,
-                accumulatedFilas: this.accumulatedRows.length,
+                accumulatedFilas: this.accumulatedRowCount,
                 hasMoreData,
                 isLoading: true,
                 fetchCount: this.fetchCount,
                 datasetSignature: "",
                 analyticsCacheHit: false,
-                analyticsRebuilt: false,
+                analyticsRebuilt: !!interimAnalytics,
                 dataReductionText,
-                analytics: null,
+                analytics: interimAnalytics,
                 performanceMetrics
             };
         }
@@ -1399,18 +1532,39 @@ export class Visual implements IVisual {
             ? 0
             : performance.now() - this.segmentLoadStartTime;
 
-        let analytics = this.analyticsCache;
+        let analytics: AnalyticsEngine | null = null;
         let analyticsCacheHit = false;
         let analyticsRebuilt = false;
+        const cachedAnalytics = this.enableAnalyticsCache
+            ? this.getCachedAnalytics(datasetSignature)
+            : null;
 
-        if (analytics && datasetSignature === this.lastDatasetSignature) {
+        if (cachedAnalytics) {
+            analytics = cachedAnalytics;
             analyticsCacheHit = true;
+        } else if (this.incrementalAnalytics) {
+            const analyticsResult = measure("finalizeIncrementalAnalyticsEngine", () => {
+                this.incrementalAnalytics?.finalizeBuild();
+                return this.incrementalAnalytics as AnalyticsEngine;
+            });
+            performanceMetrics.buildAnalyticsEngineMs = analyticsResult.ms;
+            analytics = analyticsResult.value;
+            if (this.enableAnalyticsCache) {
+                this.cacheAnalytics(datasetSignature, analytics, this.accumulatedRowCount);
+            }
+            analyticsRebuilt = true;
+
+            const buildMetrics = analytics.getBuildMetrics();
+            performanceMetrics.buildFlatIndexesMs = buildMetrics.buildFlatIndexesMs;
+            performanceMetrics.buildRelationIndexesMs = buildMetrics.buildRelationIndexesMs;
+            performanceMetrics.lazySampleQueryMs = buildMetrics.lazySampleQueryMs;
         } else {
             const analyticsResult = measure("buildAnalyticsEngine", () => AnalyticsEngine.build(this.accumulatedRows));
             performanceMetrics.buildAnalyticsEngineMs = analyticsResult.ms;
             analytics = analyticsResult.value;
-            this.analyticsCache = analytics;
-            this.lastDatasetSignature = datasetSignature;
+            if (this.enableAnalyticsCache) {
+                this.cacheAnalytics(datasetSignature, analytics, this.accumulatedRowCount);
+            }
             analyticsRebuilt = true;
 
             const buildMetrics = analytics.getBuildMetrics();
@@ -1419,6 +1573,9 @@ export class Visual implements IVisual {
             performanceMetrics.lazySampleQueryMs = buildMetrics.lazySampleQueryMs;
         }
 
+        this.analyticsCache = analytics;
+        this.accumulatedRowKeys.clear();
+        this.lastDatasetSignature = datasetSignature;
         const lazyDiagnostics = analytics.getLazyNavigationDiagnostics();
         performanceMetrics.indexedRegiones = lazyDiagnostics.regionesIndexadas;
         performanceMetrics.indexedProvincias = lazyDiagnostics.provinciasIndexadas;
@@ -1427,23 +1584,23 @@ export class Visual implements IVisual {
         performanceMetrics.fetchCount = this.fetchCount;
         performanceMetrics.analyticsCacheHit = analyticsCacheHit;
         performanceMetrics.analyticsRebuilt = analyticsRebuilt;
-        performanceMetrics.rowsPerSecond = this.calculateProcessingRate(this.accumulatedRows.length, performanceMetrics.buildAnalyticsEngineMs || performanceMetrics.updateTotalMs);
-        performanceMetrics.msPer10kRows = this.calculateMsPer10k(this.accumulatedRows.length, performanceMetrics.buildAnalyticsEngineMs || performanceMetrics.updateTotalMs);
-        console.table([
-            analytics.getUnitKpi("UGSC"),
-            analytics.getUnitKpi("UGM")
-        ]);
-        console.table(analytics.getUgmeKpi().grupos);
+        performanceMetrics.rowsPerSecond = this.calculateProcessingRate(this.accumulatedRowCount, performanceMetrics.buildAnalyticsEngineMs || performanceMetrics.updateTotalMs);
+        performanceMetrics.msPer10kRows = this.calculateMsPer10k(this.accumulatedRowCount, performanceMetrics.buildAnalyticsEngineMs || performanceMetrics.updateTotalMs);
+        this.logDataFlow("final-render", {
+            datasetSignature,
+            accumulatedRows: this.accumulatedRowCount,
+            analyticsCacheHit,
+            analyticsRebuilt,
+            buildAnalyticsEngineMs: performanceMetrics.buildAnalyticsEngineMs
+        });
 
         return {
             dataViewCount: dataViews.length,
             hasTable: !!table,
             columnIndexes,
             columns,
-            rows,
-            records,
             segmentFilas: records.length,
-            accumulatedFilas: this.accumulatedRows.length,
+            accumulatedFilas: this.accumulatedRowCount,
             hasMoreData,
             isLoading: false,
             fetchCount: this.fetchCount,
@@ -1512,7 +1669,53 @@ export class Visual implements IVisual {
         }));
     }
 
-    private accumulateRecords(records: SourceRecord[]): void {
+    private createStreamingIndexes(): StreamingVisualIndexes {
+        return {
+            regionAnalytics: new Map<string, AnalyticsEngine>(),
+            provinciaPoints: new Map<string, MapPointAccumulator>(),
+            distritoPoints: new Map<string, MapPointAccumulator>(),
+            schoolPoints: [],
+            detailRowsByUnit: new Map<UnitKpiName, Map<string, UnitDetailRow>>()
+        };
+    }
+
+    private resetStreamingState(): void {
+        this.accumulatedRows = [];
+        this.accumulatedRowKeys = new Set<string>();
+        this.streamingIndexes = this.createStreamingIndexes();
+        this.accumulatedRowCount = 0;
+        this.detailCacheByUnit = new Map<string, UnitDetailRow[]>();
+        this.internalFilterAnalyticsCache = new Map<string, AnalyticsEngine>();
+    }
+
+    private accumulateRecords(records: SourceRecord[], hasMoreData: boolean, incomingDataSignature: string): void {
+        if (this.useCurrentDataViewOnly) {
+            this.resetStreamingState();
+            this.incrementalAnalytics = AnalyticsEngine.createEmpty();
+            this.incrementalAnalytics.addRecords(records);
+            this.updateStreamingIndexes(records);
+            this.accumulatedRows = records.slice();
+            this.accumulatedRowCount = records.length;
+            this.lastAccumulatedIncomingSignature = incomingDataSignature;
+            return;
+        }
+
+        if (incomingDataSignature && incomingDataSignature === this.lastAccumulatedIncomingSignature) {
+            return;
+        }
+
+        if (!hasMoreData && !this.isFetching && this.fetchCount === 0 && !this.accumulatedRowCount) {
+            this.resetStreamingState();
+            this.incrementalAnalytics = AnalyticsEngine.createEmpty();
+            this.incrementalAnalytics.addRecords(records);
+            this.updateStreamingIndexes(records);
+            this.accumulatedRows = records.slice();
+            this.accumulatedRowCount = records.length;
+            this.lastAccumulatedIncomingSignature = incomingDataSignature;
+            return;
+        }
+
+        const appendedRecords: SourceRecord[] = [];
         records.forEach((record: SourceRecord) => {
             const recordKey = this.recordKey(record);
             if (this.accumulatedRowKeys.has(recordKey)) {
@@ -1520,23 +1723,145 @@ export class Visual implements IVisual {
             }
 
             this.accumulatedRowKeys.add(recordKey);
-            this.accumulatedRows.push(record);
+            appendedRecords.push(record);
+        });
+
+        if (appendedRecords.length) {
+            if (!this.incrementalAnalytics) {
+                this.incrementalAnalytics = AnalyticsEngine.createEmpty();
+            }
+
+            this.incrementalAnalytics.addRecords(appendedRecords);
+            this.updateStreamingIndexes(appendedRecords);
+            this.accumulatedRows.push(...appendedRecords);
+            this.accumulatedRowCount += appendedRecords.length;
+        }
+
+        this.lastAccumulatedIncomingSignature = incomingDataSignature;
+    }
+
+    private updateStreamingIndexes(records: SourceRecord[]): void {
+        records.forEach((record: SourceRecord) => {
+            this.updateRegionAnalyticsIndex(record);
+            this.updateMapPointIndexes(record);
+            this.updateDetailIndex(record);
+        });
+
+        this.detailCacheByUnit = new Map<string, UnitDetailRow[]>();
+    }
+
+    private updateRegionAnalyticsIndex(record: SourceRecord): void {
+        const regionKey = this.normalizeRegionForMap(record.region);
+        if (!regionKey) {
+            return;
+        }
+
+        const keys = Array.from(new Set<string>([regionKey, ...this.getRegionAliases(regionKey)]));
+        keys.forEach((key: string) => {
+            const regionEngine = this.streamingIndexes.regionAnalytics.get(key) || AnalyticsEngine.createEmpty();
+            regionEngine.addRecords([record]);
+            this.streamingIndexes.regionAnalytics.set(key, regionEngine);
         });
     }
 
-    private logDiagnostics(diagnostics: TableDiagnostics): void {
-        console.group(`Update #${this.updateCount}`);
-        console.log("Rows acumuladas", diagnostics.accumulatedFilas);
-        console.log("Hay mas segmentos", diagnostics.hasMoreData);
-        console.log("Analytics cache hit", diagnostics.analyticsCacheHit);
-        console.log("Analytics rebuilt", diagnostics.analyticsRebuilt);
-        console.log("Tiempo Analytics", diagnostics.performanceMetrics.buildAnalyticsEngineMs);
-        console.log("Tiempo Render", diagnostics.performanceMetrics.renderMs);
-        console.log("Dataset Signature", diagnostics.datasetSignature || "loading");
-        console.groupEnd();
+    private updateMapPointIndexes(record: SourceRecord): void {
+        if (!this.hasValidCoordinates(record)) {
+            return;
+        }
+
+        const regionKey = this.normalizeRegionForMap(record.region);
+        this.updateMapPointAccumulator(this.streamingIndexes.provinciaPoints, regionKey, record.provincia, record);
+        this.updateMapPointAccumulator(this.streamingIndexes.distritoPoints, regionKey, record.distrito, record);
+        this.streamingIndexes.schoolPoints.push({
+            regionKey,
+            label: record.codigoLocal || record.nombreLocal || "-",
+            lat: record.latitud,
+            lng: record.longitud,
+            riskLevel: record.nivelRiesgo
+        });
+    }
+
+    private updateMapPointAccumulator(
+        target: Map<string, MapPointAccumulator>,
+        regionKey: string,
+        labelValue: string,
+        record: SourceRecord
+    ): void {
+        const label = labelValue || "-";
+        const key = `${regionKey}|${this.normalizeText(label)}`;
+        const accumulator = target.get(key) || {
+            key,
+            label,
+            regionKey,
+            count: 0,
+            latTotal: 0,
+            lngTotal: 0,
+            riskBreakdown: { bajo: 0, medio: 0, alto: 0, muyAlto: 0 }
+        };
+
+        accumulator.count += 1;
+        accumulator.latTotal += record.latitud;
+        accumulator.lngTotal += record.longitud;
+        this.addRiskToBreakdown(accumulator.riskBreakdown, record.nivelRiesgo);
+        target.set(key, accumulator);
+    }
+
+    private updateDetailIndex(record: SourceRecord): void {
+        const unit = this.normalizeText(record.unidadGerencial) as UnitKpiName;
+        if (!this.isUnitKpiName(unit)) {
+            return;
+        }
+
+        const unitRows = this.streamingIndexes.detailRowsByUnit.get(unit) || new Map<string, UnitDetailRow>();
+        const codigoKey = this.normalizeText(record.codigoLocal);
+        const grupoKey = unit === "UGME" ? this.normalizeText(record.grupo) : "";
+        const detailKey = unit === "UGME" ? `${codigoKey}|${grupoKey}` : codigoKey;
+        const row = unitRows.get(detailKey) || {
+            unit,
+            codigoLocal: record.codigoLocal || "-",
+            nombreLocal: record.nombreLocal || "-",
+            region: record.region || "-",
+            provincia: record.provincia || "-",
+            distrito: record.distrito || "-",
+            grupo: unit === "UGME" ? record.grupo || "-" : undefined,
+            montoIntervencion: 0,
+            beneficiarios: 0,
+            cantidad: 0,
+            solicitudes: new Set<string>(),
+            solicitudesRevision: new Set<string>(),
+            solicitudesCulminadas: new Set<string>(),
+            montoAsignado: 0,
+            montoTransferencia: 0,
+            montoRetirado: 0
+        };
+
+        row.montoIntervencion += Number(record.montoIntervencion) || 0;
+        row.beneficiarios += Number(record.beneficiarios) || 0;
+        row.cantidad += Number(record.cantidad) || 0;
+        row.montoAsignado += Number(record.montoAsignado) || 0;
+        row.montoTransferencia += Number(record.montoTransferencia) || 0;
+        row.montoRetirado += Number(record.montoRetirado) || 0;
+
+        this.addValidDetailDistinct(row.solicitudes, record.idSolicitud);
+        const estado = this.normalizeText(record.estadoSolicitud);
+        if (estado === "EN REVISION" || estado === "REVISION") {
+            this.addValidDetailDistinct(row.solicitudesRevision, record.idSolicitud);
+        }
+
+        if (estado === "CULMINADO" || estado === "CULMINADA" || estado === "CULMINADOS" || estado === "CULMINADAS") {
+            this.addValidDetailDistinct(row.solicitudesCulminadas, record.idSolicitud);
+        }
+
+        unitRows.set(detailKey, row);
+        this.streamingIndexes.detailRowsByUnit.set(unit, unitRows);
+    }
+
+    private isUnitKpiName(value: string): value is UnitKpiName {
+        return value === "UGRD" || value === "UGEO" || value === "UGSC" || value === "UGM" || value === "UGME";
     }
 
     private render(diagnostics: TableDiagnostics): void {
+        this.removeLeafletMap();
         this.target.replaceChildren();
 
         if (!diagnostics.hasTable) {
@@ -1547,6 +1872,20 @@ export class Visual implements IVisual {
 
         if (this.hasMissingRole(diagnostics.columnIndexes)) {
             this.appendMessage("Missing one or more required roles for unit KPI cards.");
+            this.appendPerformanceMini(diagnostics);
+            return;
+        }
+
+        if (diagnostics.isLoading && diagnostics.analytics) {
+            this.reconcileInternalFilters();
+            const renderAnalytics = this.getInternalFilteredAnalytics(diagnostics.analytics);
+            if (this.currentView === "ugme") {
+                this.appendUgmeView(renderAnalytics);
+            } else {
+                this.appendSummaryView(renderAnalytics);
+            }
+
+            this.appendLoadingStatusBadge(diagnostics);
             this.appendPerformanceMini(diagnostics);
             return;
         }
@@ -1563,10 +1902,12 @@ export class Visual implements IVisual {
             return;
         }
 
+        this.reconcileInternalFilters();
+        const renderAnalytics = this.getInternalFilteredAnalytics(diagnostics.analytics);
         if (this.currentView === "ugme") {
-            this.appendUgmeView(diagnostics.analytics);
+            this.appendUgmeView(renderAnalytics);
         } else {
-            this.appendSummaryView(diagnostics.analytics);
+            this.appendSummaryView(renderAnalytics);
         }
 
         if (this.isDetailModalOpen && this.detailModalUnit) {
@@ -1578,7 +1919,8 @@ export class Visual implements IVisual {
 
     private appendSummaryView(engine: AnalyticsEngine): void {
         const view = document.createElement("section");
-        view.className = "dashboard-root";
+        view.className = "dashboard-root with-internal-filters";
+        this.appendInternalFilterBar(view);
 
         const layout = document.createElement("div");
         layout.className = "main-dashboard-layout";
@@ -1588,18 +1930,32 @@ export class Visual implements IVisual {
         this.appendPeruRiskMap(mapPanel, engine);
         layout.appendChild(mapPanel);
 
+        const unitsPanel = this.createSummaryUnitsPanel(engine);
+
+        layout.appendChild(unitsPanel);
+        view.appendChild(layout);
+
+        this.target.appendChild(view);
+    }
+
+    private createSummaryUnitsPanel(engine: AnalyticsEngine): HTMLElement {
         const unitsPanel = document.createElement("section");
         unitsPanel.className = "units-panel";
+        const unitEngine = this.getSelectedRegionEngine(engine);
+
+        this.appendInformationBanner(unitsPanel, unitEngine);
 
         const title = document.createElement("h1");
-        title.textContent = "RESUMEN POR UNIDADES GERENCIALES";
+        title.textContent = this.selectedRegion
+            ? `RESUMEN POR UNIDADES GERENCIALES - ${this.selectedRegion}`
+            : "RESUMEN POR UNIDADES GERENCIALES";
         unitsPanel.appendChild(title);
 
         const grid = document.createElement("div");
         grid.className = "unit-grid";
 
         (["UGRD", "UGSC", "UGEO", "UGM"] as UnitKpiName[]).forEach((unit: UnitKpiName) => {
-            grid.appendChild(this.createUnitCard(engine.getUnitKpi(unit), false));
+            grid.appendChild(this.createUnitCard(unitEngine.getUnitKpi(unit), false));
         });
 
         unitsPanel.appendChild(grid);
@@ -1608,16 +1964,324 @@ export class Visual implements IVisual {
         nextButton.className = "floating-next-button";
         nextButton.type = "button";
         nextButton.textContent = ">";
-        nextButton.onclick = () => {
-            this.currentView = "ugme";
-            this.renderCurrentView();
-        };
+        nextButton.onclick = () => this.switchVisualView("ugme");
         unitsPanel.appendChild(nextButton);
 
-        layout.appendChild(unitsPanel);
-        view.appendChild(layout);
+        return unitsPanel;
+    }
 
-        this.target.appendChild(view);
+    private switchVisualView(nextView: VisualView): void {
+        this.currentView = nextView;
+        if (!this.replaceUnitsPanelForCurrentView()) {
+            this.renderCurrentView();
+        }
+    }
+
+    private replaceUnitsPanelForCurrentView(): boolean {
+        if (!this.latestDiagnostics?.analytics) {
+            return false;
+        }
+
+        const layout = this.target.querySelector(".main-dashboard-layout");
+        const currentPanel = layout?.querySelector(".units-panel");
+        const root = this.target.querySelector(".dashboard-root");
+        if (!layout || !currentPanel || !root) {
+            return false;
+        }
+
+        this.reconcileInternalFilters();
+        const engine = this.getInternalFilteredAnalytics(this.latestDiagnostics.analytics);
+        const nextPanel = this.currentView === "ugme"
+            ? this.createUgmeUnitsPanel(engine)
+            : this.createSummaryUnitsPanel(engine);
+
+        currentPanel.replaceWith(nextPanel);
+        root.classList.toggle("ugme-dashboard-view", this.currentView === "ugme");
+        return true;
+    }
+
+    private appendInternalFilterBar(container: HTMLElement): void {
+        const filterBar = document.createElement("section");
+        filterBar.className = "internal-filter-bar";
+
+        const definitions: InternalFilterDefinition[] = [
+            { key: "region", label: "Región", placeholder: "Todas" },
+            { key: "provincia", label: "Provincia", placeholder: "Todas" },
+            { key: "distrito", label: "Distrito", placeholder: "Todos" },
+            { key: "codigoLocal", label: "Código local", placeholder: "Todos" }
+        ];
+
+        definitions.push({ key: "nombreLocal", label: "Nombre local", placeholder: "Todos" });
+
+        definitions.forEach((definition: InternalFilterDefinition) => {
+            filterBar.appendChild(this.createInternalFilterDropdown(definition));
+        });
+
+        const clearButton = document.createElement("button");
+        clearButton.className = "internal-filter-clear";
+        clearButton.type = "button";
+        clearButton.textContent = "Limpiar";
+        clearButton.disabled = !this.hasInternalFilters();
+        clearButton.onclick = () => {
+            this.internalFilters = {
+                region: "",
+                provincia: "",
+                distrito: "",
+                codigoLocal: "",
+                nombreLocal: ""
+            };
+            this.openInternalFilter = null;
+            this.clearInteractiveSelectionState();
+            this.renderCurrentView();
+        };
+        filterBar.appendChild(clearButton);
+
+        container.appendChild(filterBar);
+    }
+
+    private createInternalFilterDropdown(definition: InternalFilterDefinition): HTMLElement {
+        const wrapper = document.createElement("div");
+        wrapper.className = `internal-filter-dropdown${this.openInternalFilter === definition.key ? " is-open" : ""}`;
+
+        const label = document.createElement("span");
+        label.className = "internal-filter-label";
+        label.textContent = definition.label;
+        wrapper.appendChild(label);
+
+        const button = document.createElement("button");
+        button.className = "internal-filter-button";
+        button.type = "button";
+        button.textContent = this.internalFilters[definition.key] || definition.placeholder;
+        button.title = this.internalFilters[definition.key] || definition.placeholder;
+        button.onclick = () => {
+            this.openInternalFilter = this.openInternalFilter === definition.key ? null : definition.key;
+            const filterBar = button.closest(".internal-filter-bar");
+            filterBar?.querySelectorAll(".internal-filter-dropdown").forEach((dropdown: Element) => {
+                dropdown.classList.remove("is-open");
+            });
+            if (this.openInternalFilter === definition.key) {
+                wrapper.classList.add("is-open");
+                const searchInput = wrapper.querySelector(".internal-filter-search input") as HTMLInputElement | null;
+                window.setTimeout(() => searchInput?.focus(), 0);
+            }
+        };
+        wrapper.appendChild(button);
+
+        {
+            const menu = document.createElement("div");
+            menu.className = "internal-filter-menu";
+
+            const searchWrap = document.createElement("div");
+            searchWrap.className = "internal-filter-search";
+
+            const searchIcon = document.createElement("span");
+            searchIcon.textContent = "🔍";
+            searchWrap.appendChild(searchIcon);
+
+            const searchInput = document.createElement("input");
+            searchInput.type = "search";
+            searchInput.placeholder = `Buscar ${definition.label.toLowerCase()}`;
+            searchInput.setAttribute("aria-label", `Buscar ${definition.label.toLowerCase()}`);
+            searchWrap.appendChild(searchInput);
+            menu.appendChild(searchWrap);
+
+            const options = this.getInternalFilterOptions(definition.key);
+            const list = document.createElement("div");
+            list.className = "internal-filter-option-list";
+            menu.appendChild(list);
+
+            const renderOptions = (query: string): void => {
+                const normalizedQuery = this.normalizeText(query);
+                const filteredOptions = normalizedQuery
+                    ? options.filter((option: string) => this.normalizeText(option).includes(normalizedQuery))
+                    : options;
+                const visibleOptions = filteredOptions.slice(0, 300);
+                list.replaceChildren();
+                list.appendChild(this.createInternalFilterOption(definition.key, "", definition.placeholder, true));
+                visibleOptions.forEach((option: string) => {
+                    list.appendChild(this.createInternalFilterOption(definition.key, option, option, false));
+                });
+
+                if (filteredOptions.length > visibleOptions.length) {
+                    const hint = document.createElement("div");
+                    hint.className = "internal-filter-hint";
+                    hint.textContent = `Mostrando ${visibleOptions.length} de ${filteredOptions.length}. Escribe para reducir.`;
+                    list.appendChild(hint);
+                }
+            };
+
+            searchInput.oninput = () => renderOptions(searchInput.value);
+            searchInput.onclick = (event: MouseEvent) => event.stopPropagation();
+            renderOptions("");
+
+            wrapper.appendChild(menu);
+        }
+
+        return wrapper;
+    }
+
+    private createInternalFilterOption(
+        key: InternalFilterKey,
+        value: string,
+        label: string,
+        isAllOption: boolean
+    ): HTMLButtonElement {
+        const option = document.createElement("button");
+        option.className = `internal-filter-option${this.internalFilters[key] === value ? " is-selected" : ""}`;
+        option.type = "button";
+        option.textContent = label;
+        option.title = label;
+        option.onclick = () => {
+            this.setInternalFilter(key, value);
+        };
+
+        if (isAllOption) {
+            option.classList.add("is-all-option");
+        }
+
+        return option;
+    }
+
+    private setInternalFilter(key: InternalFilterKey, value: string): void {
+        this.internalFilters = {
+            ...this.internalFilters,
+            [key]: value
+        };
+
+        if (key === "region") {
+            this.internalFilters.provincia = "";
+            this.internalFilters.distrito = "";
+            this.internalFilters.codigoLocal = "";
+            this.internalFilters.nombreLocal = "";
+        } else if (key === "provincia") {
+            this.internalFilters.distrito = "";
+            this.internalFilters.codigoLocal = "";
+            this.internalFilters.nombreLocal = "";
+        } else if (key === "distrito") {
+            this.internalFilters.codigoLocal = "";
+            this.internalFilters.nombreLocal = "";
+        } else if (key === "codigoLocal") {
+            this.internalFilters.nombreLocal = "";
+        }
+
+        this.openInternalFilter = null;
+        this.clearInteractiveSelectionState();
+        this.renderCurrentView();
+    }
+
+    private clearInteractiveSelectionState(): void {
+        this.selectedRegion = null;
+        this.autoFocusedRegion = null;
+        this.suppressedAutoFocusSignature = "";
+        this.selectedRegionAnalyticsCache = null;
+        this.selectedRegionAnalyticsCacheKey = "";
+        this.activeMapDrillKey = "";
+    }
+
+    private hasInternalFilters(): boolean {
+        return !!(
+            this.internalFilters.region ||
+            this.internalFilters.provincia ||
+            this.internalFilters.distrito ||
+            this.internalFilters.codigoLocal ||
+            this.internalFilters.nombreLocal
+        );
+    }
+
+    private getInternalFilterOptions(key: InternalFilterKey): string[] {
+        const values = new Set<string>();
+
+        this.accumulatedRows.forEach((record: SourceRecord) => {
+            if (!this.recordMatchesInternalFilters(record, key)) {
+                return;
+            }
+
+            const value = record[key];
+            if (value) {
+                values.add(value);
+            }
+        });
+
+        return Array.from(values).sort((left: string, right: string) => left.localeCompare(right));
+    }
+
+    private recordMatchesInternalFilters(record: SourceRecord, ignoreKey?: InternalFilterKey): boolean {
+        const filters = this.internalFilters;
+
+        if (ignoreKey !== "region" && filters.region && this.normalizeText(record.region) !== this.normalizeText(filters.region)) {
+            return false;
+        }
+
+        if (ignoreKey !== "provincia" && filters.provincia && this.normalizeText(record.provincia) !== this.normalizeText(filters.provincia)) {
+            return false;
+        }
+
+        if (ignoreKey !== "distrito" && filters.distrito && this.normalizeText(record.distrito) !== this.normalizeText(filters.distrito)) {
+            return false;
+        }
+
+        if (ignoreKey !== "codigoLocal" && filters.codigoLocal && this.normalizeText(record.codigoLocal) !== this.normalizeText(filters.codigoLocal)) {
+            return false;
+        }
+
+        if (ignoreKey !== "nombreLocal" && filters.nombreLocal && this.normalizeText(record.nombreLocal) !== this.normalizeText(filters.nombreLocal)) {
+            return false;
+        }
+
+        return true;
+    }
+
+    private reconcileInternalFilters(): void {
+        (["region", "provincia", "distrito", "codigoLocal", "nombreLocal"] as InternalFilterKey[]).forEach((key: InternalFilterKey) => {
+            if (!this.internalFilters[key]) {
+                return;
+            }
+
+            const exists = this.accumulatedRows.some((record: SourceRecord) => (
+                this.normalizeText(record[key]) === this.normalizeText(this.internalFilters[key]) &&
+                this.recordMatchesInternalFilters(record, key)
+            ));
+
+            if (!exists) {
+                this.internalFilters[key] = "";
+            }
+        });
+    }
+
+    private getInternalFilteredAnalytics(baseEngine: AnalyticsEngine): AnalyticsEngine {
+        if (!this.hasInternalFilters() || !this.accumulatedRows.length) {
+            return baseEngine;
+        }
+
+        const filterKey = this.getInternalFilterCacheKey();
+        const cached = this.internalFilterAnalyticsCache.get(filterKey);
+        if (cached) {
+            return cached;
+        }
+
+        const filteredRows = this.accumulatedRows.filter((record: SourceRecord) => this.recordMatchesInternalFilters(record));
+        const filteredEngine = AnalyticsEngine.build(filteredRows);
+        this.internalFilterAnalyticsCache.set(filterKey, filteredEngine);
+
+        if (this.internalFilterAnalyticsCache.size > 4) {
+            const oldestKey = this.internalFilterAnalyticsCache.keys().next().value;
+            if (oldestKey) {
+                this.internalFilterAnalyticsCache.delete(oldestKey);
+            }
+        }
+
+        return filteredEngine;
+    }
+
+    private getInternalFilterCacheKey(): string {
+        return [
+            this.lastDatasetSignature,
+            this.normalizeText(this.internalFilters.region),
+            this.normalizeText(this.internalFilters.provincia),
+            this.normalizeText(this.internalFilters.distrito),
+            this.normalizeText(this.internalFilters.codigoLocal),
+            this.normalizeText(this.internalFilters.nombreLocal)
+        ].join("|");
     }
 
     private appendPeruRiskMap(container: HTMLElement, engine: AnalyticsEngine): void {
@@ -1629,66 +2293,519 @@ export class Visual implements IVisual {
         const map = document.createElement("div");
         map.className = "peru-risk-map";
 
-        const tooltip = document.createElement("div");
-        tooltip.className = "region-tooltip";
-        tooltip.style.display = "none";
-        map.appendChild(tooltip);
+        const leafletContainer = document.createElement("div");
+        leafletContainer.className = "leaflet-risk-map";
+        map.appendChild(leafletContainer);
 
+        this.appendMapResetButton(map);
+        this.appendRiskToggle(map);
+        this.appendMapRankingControl(map, engine);
+        container.appendChild(map);
+
+        window.setTimeout(() => this.renderLeafletPeruMap(leafletContainer, engine), 0);
+    }
+
+    private renderLeafletPeruMap(mapElement: HTMLElement, engine: AnalyticsEngine): void {
         const aggregates = this.getRegionAggregates(engine);
         const aggregateMap = this.createRegionAggregateMap(aggregates);
-        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-        svg.setAttribute("class", "map-svg");
-        svg.setAttribute("viewBox", "0 0 920 1220");
-        svg.setAttribute("role", "img");
-        svg.setAttribute("aria-label", "Mapa de riesgo por region del Peru");
-
-        peruRegionShapes.forEach((shape: MapRegionShape) => {
-            const aggregate = this.findRegionAggregate(shape.name, aggregateMap);
-            const selectedCount = aggregate ? this.getRiskValue(aggregate.riskBreakdown, this.selectedRiskView) : 0;
-            const ratio = aggregate?.totalColegios ? selectedCount / aggregate.totalColegios : Number.NaN;
-            const normalizedShape = this.normalizeRegionForMap(shape.name);
-            const selected = !!this.selectedRegion && this.normalizeRegionForMap(this.selectedRegion) === normalizedShape;
-
-            if (!aggregate && !this.warnedMissingRegionMatches.has(normalizedShape)) {
-                console.warn("Region sin match de agregados para mapa", shape.name);
-                this.warnedMissingRegionMatches.add(normalizedShape);
-            }
-
-            const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-            path.setAttribute("d", shape.path);
-            path.setAttribute("fill", getRiskRatioColor(ratio));
-            path.setAttribute("class", [
-                "map-region",
-                aggregate ? "" : "map-region-no-data",
-                selected ? "map-region-selected" : ""
-            ].filter(Boolean).join(" "));
-            path.setAttribute("data-region", shape.name);
-
-            path.onmouseenter = (event: MouseEvent) => this.showRegionTooltip(tooltip, map, shape.name, aggregate, selectedCount, ratio, event);
-            path.onmousemove = (event: MouseEvent) => this.positionRegionTooltip(tooltip, map, event);
-            path.onmouseleave = () => {
-                tooltip.style.display = "none";
-            };
-            path.onclick = () => {
-                this.selectedRegion = shape.name;
-                console.log("onRegionClick", shape.name, aggregate);
-                this.renderCurrentView();
-            };
-
-            svg.appendChild(path);
-
-            const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
-            label.setAttribute("x", shape.labelX.toString());
-            label.setAttribute("y", shape.labelY.toString());
-            label.setAttribute("class", "map-region-label");
-            label.textContent = this.shortRegionLabel(shape.name);
-            svg.appendChild(label);
+        this.autoFocusedRegion = this.selectedRegion
+            ? null
+            : this.getAutoFocusedRegion(engine);
+        const mapHeatScale = this.buildMapHeatScale(aggregates);
+        const map = L.map(mapElement, {
+            zoomControl: true,
+            dragging: true,
+            scrollWheelZoom: true,
+            doubleClickZoom: false,
+            touchZoom: true,
+            boxZoom: true,
+            keyboard: true
         });
 
-        map.appendChild(svg);
-        this.appendMapNationalSummary(map, engine);
-        this.appendRiskToggle(map);
-        container.appendChild(map);
+        this.leafletMap = map;
+        this.ensureOpenStreetMapTileLayer(map);
+
+        let selectedLayer: L.Layer | null = null;
+        const hideContextMenu = () => this.hideMapContextMenu();
+        const geoJsonLayer = L.geoJSON(peruRegionGeoJson as FeatureCollection<Geometry>, {
+            style: (feature?: Feature<Geometry>) => this.getRegionLayerStyle(feature, aggregateMap, mapHeatScale),
+            onEachFeature: (feature: Feature<Geometry>, layer: L.Layer) => {
+                const regionName = this.getGeoJsonRegionName(feature);
+                const aggregate = this.findRegionAggregate(regionName, aggregateMap);
+                const isSelected = this.isSelectedRegion(regionName);
+
+                if (isSelected) {
+                    selectedLayer = layer;
+                }
+
+                layer.bindTooltip(this.createRegionTooltip(regionName, aggregate), {
+                    sticky: true,
+                    direction: "top",
+                    opacity: 0.95,
+                    className: "region-leaflet-tooltip"
+                });
+
+                layer.on({
+                    mouseover: () => {
+                        const pathLayer = layer as L.Path;
+                        pathLayer.setStyle({
+                            fillOpacity: 0.78,
+                            weight: 3
+                        });
+                        pathLayer.bringToFront();
+                    },
+                    mouseout: () => {
+                        geoJsonLayer.resetStyle(layer as L.Path);
+                        (layer as L.Path).bringToFront();
+                    },
+                    click: () => {
+                        hideContextMenu();
+                        if (this.isRegionNameSelected(regionName)) {
+                            this.resetMapFocus(true);
+                        } else {
+                            this.selectedRegion = regionName;
+                            this.autoFocusedRegion = null;
+                            this.suppressedAutoFocusSignature = "";
+                            this.selectedRegionAnalyticsCache = null;
+                            this.selectedRegionAnalyticsCacheKey = "";
+                        }
+                        this.renderCurrentView();
+                    },
+                    dblclick: (event: L.LeafletMouseEvent) => {
+                        L.DomEvent.preventDefault(event.originalEvent);
+                        L.DomEvent.stopPropagation(event.originalEvent);
+                        this.resetMapFocus(true);
+                        this.renderCurrentView();
+                    },
+                    contextmenu: (event: L.LeafletMouseEvent) => {
+                        L.DomEvent.preventDefault(event.originalEvent);
+                        L.DomEvent.stopPropagation(event.originalEvent);
+                        this.showMapContextMenu(mapElement, map, regionName, event);
+                    }
+                });
+            }
+        }).addTo(map);
+
+        map.on("click", hideContextMenu);
+        map.on("movestart", hideContextMenu);
+        geoJsonLayer.bringToFront();
+        const focusLayer = selectedLayer as L.FeatureGroup | L.Polygon | L.Polyline | null;
+        const focusBounds = focusLayer && "getBounds" in focusLayer
+            ? focusLayer.getBounds()
+            : geoJsonLayer.getBounds();
+        map.fitBounds(focusBounds, { padding: [20, 20] });
+        map.invalidateSize();
+    }
+
+    private getAutoFocusedRegion(engine: AnalyticsEngine): string | null {
+        if (this.suppressedAutoFocusSignature === this.lastDatasetSignature) {
+            return null;
+        }
+
+        const regions = engine.getRegions();
+        return regions.length === 1 ? regions[0].label : null;
+    }
+
+    private resetMapFocus(suppressAutoFocus: boolean): void {
+        this.selectedRegion = null;
+        this.autoFocusedRegion = null;
+        this.activeMapDrillKey = "";
+        this.selectedRegionAnalyticsCache = null;
+        this.selectedRegionAnalyticsCacheKey = "";
+        this.hideMapContextMenu();
+
+        if (suppressAutoFocus) {
+            this.suppressedAutoFocusSignature = this.lastDatasetSignature;
+        }
+    }
+
+    private showMapContextMenu(
+        mapElement: HTMLElement,
+        map: L.Map,
+        regionName: string,
+        event: L.LeafletMouseEvent
+    ): void {
+        this.hideMapContextMenu();
+
+        const menu = document.createElement("div");
+        menu.className = "map-context-menu";
+        menu.style.left = `${event.containerPoint.x}px`;
+        menu.style.top = `${event.containerPoint.y}px`;
+
+        [
+            { label: "Ver Provincias", mode: "provincias" as MapDrillMode },
+            { label: "Ver Distritos", mode: "distritos" as MapDrillMode },
+            { label: "Ver Colegios", mode: "colegios" as MapDrillMode }
+        ].forEach((option: { label: string; mode: MapDrillMode }) => {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.textContent = option.label;
+            button.onclick = () => {
+                this.hideMapContextMenu();
+                this.showRegionDrillLayer(map, regionName, option.mode);
+            };
+            menu.appendChild(button);
+        });
+
+        mapElement.parentElement?.appendChild(menu);
+        this.mapContextMenu = menu;
+    }
+
+    private hideMapContextMenu(): void {
+        if (this.mapContextMenu) {
+            this.mapContextMenu.remove();
+            this.mapContextMenu = null;
+        }
+    }
+
+    private showRegionDrillLayer(map: L.Map, regionName: string, mode: MapDrillMode): void {
+        const layerKey = `${this.lastDatasetSignature}|${this.normalizeRegionForMap(regionName)}|${mode}|${map.getZoom()}`;
+        if (this.activeMapDrillKey === layerKey && this.activeMapDrillLayer) {
+            return;
+        }
+
+        if (this.activeMapDrillLayer) {
+            this.activeMapDrillLayer.remove();
+            this.activeMapDrillLayer = null;
+        }
+
+        const points = mode === "colegios"
+            ? this.buildSchoolClusters(map, regionName)
+            : this.buildMapPointSummaries(regionName, mode);
+        const layer = L.layerGroup();
+
+        points.forEach((point: MapPointSummary | SchoolCluster) => {
+            const marker = this.createDrillMarker(point, mode);
+            marker.addTo(layer);
+        });
+
+        layer.addTo(map);
+        this.activeMapDrillLayer = layer;
+        this.activeMapDrillKey = layerKey;
+
+        if (points.length) {
+            const bounds = L.latLngBounds(points.map((point: MapPointSummary | SchoolCluster) => [point.lat, point.lng] as L.LatLngTuple));
+            map.fitBounds(bounds, { padding: [44, 44], maxZoom: mode === "colegios" ? 10 : 8 });
+        }
+    }
+
+    private buildMapPointSummaries(regionName: string, mode: Exclude<MapDrillMode, "colegios">): MapPointSummary[] {
+        const source = mode === "provincias"
+            ? this.streamingIndexes.provinciaPoints
+            : this.streamingIndexes.distritoPoints;
+
+        return Array.from(source.values())
+            .filter((point: MapPointAccumulator) => this.matchesRegion(point.regionKey, regionName))
+            .map((point: MapPointAccumulator) => ({
+                key: point.key,
+                label: point.label,
+                count: point.count,
+                lat: point.latTotal / point.count,
+                lng: point.lngTotal / point.count,
+                riskBreakdown: point.riskBreakdown
+            }))
+            .sort((left: MapPointSummary, right: MapPointSummary) => right.count - left.count);
+    }
+
+    private buildSchoolClusters(map: L.Map, regionName: string): SchoolCluster[] {
+        const zoom = map.getZoom();
+        const cellSize = Math.max(42, 92 - zoom * 4);
+        const clusters = new Map<string, SchoolCluster>();
+
+        this.streamingIndexes.schoolPoints.forEach((point: SchoolPointIndex) => {
+            if (!this.matchesRegion(point.regionKey, regionName)) {
+                return;
+            }
+
+            const projected = map.project([point.lat, point.lng], zoom);
+            const cellX = Math.floor(projected.x / cellSize);
+            const cellY = Math.floor(projected.y / cellSize);
+            const key = `${cellX}:${cellY}`;
+            const cluster = clusters.get(key) || {
+                key,
+                count: 0,
+                lat: 0,
+                lng: 0,
+                labels: [],
+                riskBreakdown: { bajo: 0, medio: 0, alto: 0, muyAlto: 0 }
+            };
+
+            cluster.count += 1;
+            cluster.lat += point.lat;
+            cluster.lng += point.lng;
+            if (cluster.labels.length < 6) {
+                cluster.labels.push(point.label);
+            }
+            this.addRiskToBreakdown(cluster.riskBreakdown, point.riskLevel);
+            clusters.set(key, cluster);
+        });
+
+        return Array.from(clusters.values())
+            .map((cluster: SchoolCluster) => ({
+                ...cluster,
+                lat: cluster.lat / cluster.count,
+                lng: cluster.lng / cluster.count
+            }))
+            .sort((left: SchoolCluster, right: SchoolCluster) => right.count - left.count);
+    }
+
+    private createDrillMarker(point: MapPointSummary | SchoolCluster, mode: MapDrillMode): L.Marker {
+        const isCluster = mode === "colegios" && point.count > 1;
+        const icon = L.divIcon({
+            className: `map-drill-marker ${isCluster ? "map-school-cluster" : "map-drill-point"}`,
+            html: `<span>${this.formatInteger(point.count)}</span>`,
+            iconSize: isCluster ? [34, 34] : [28, 28],
+            iconAnchor: isCluster ? [17, 17] : [14, 14]
+        });
+        const marker = L.marker([point.lat, point.lng], { icon });
+        marker.bindTooltip(this.createDrillTooltip(point, mode), {
+            direction: "top",
+            opacity: 0.95,
+            className: "region-leaflet-tooltip"
+        });
+
+        return marker;
+    }
+
+    private createDrillTooltip(point: MapPointSummary | SchoolCluster, mode: MapDrillMode): HTMLElement {
+        const tooltip = document.createElement("div");
+        const title = document.createElement("strong");
+        title.textContent = "label" in point
+            ? point.label
+            : `Cluster de colegios (${this.formatInteger(point.count)})`;
+        tooltip.appendChild(title);
+
+        const rows: string[][] = [
+            [mode === "colegios" ? "Colegios agrupados" : "Registros", this.formatInteger(point.count)],
+            ["Riesgo Bajo", this.formatInteger(point.riskBreakdown.bajo)],
+            ["Riesgo Medio", this.formatInteger(point.riskBreakdown.medio)],
+            ["Riesgo Alto", this.formatInteger(point.riskBreakdown.alto)],
+            ["Riesgo Muy Alto", this.formatInteger(point.riskBreakdown.muyAlto)]
+        ];
+
+        if (!("label" in point) && point.labels.length) {
+            rows.push(["Muestra", point.labels.join(", ")]);
+        }
+
+        rows.forEach(([label, value]: string[]) => this.appendTooltipRow(tooltip, label, value));
+        return tooltip;
+    }
+
+    private getRegionLayerStyle(
+        feature: Feature<Geometry> | undefined,
+        aggregateMap: Map<string, RegionAggregate>,
+        mapHeatScale: MapHeatScale
+    ): L.PathOptions {
+        const regionName = feature ? this.getGeoJsonRegionName(feature) : "";
+        const aggregate = this.findRegionAggregate(regionName, aggregateMap);
+        const selected = this.isSelectedRegion(regionName);
+        const fillColor = this.getRegionFillColor(aggregate, mapHeatScale);
+
+        return {
+            fillColor,
+            fillOpacity: selected ? 0.82 : 0.68,
+            weight: selected ? 4 : 1.8,
+            color: selected ? "#0f172a" : "#ffffff",
+            opacity: 1
+        };
+    }
+
+    private buildMapHeatScale(aggregates: RegionAggregate[]): MapHeatScale {
+        return {
+            maxTotalColegios: aggregates.reduce((max: number, aggregate: RegionAggregate) => (
+                Math.max(max, aggregate.totalColegios)
+            ), 0),
+            riskHeatScores: this.buildRiskHeatScores(aggregates)
+        };
+    }
+
+    private getRegionFillColor(aggregate: RegionAggregate | undefined, mapHeatScale: MapHeatScale): string {
+        if (!aggregate) {
+            return getRiskGradientColor(-1);
+        }
+
+        if (this.selectedRiskView === "Total") {
+            const ratio = mapHeatScale.maxTotalColegios
+                ? aggregate.totalColegios / mapHeatScale.maxTotalColegios
+                : 0;
+            return getRiskHeatColor(ratio);
+        }
+
+        const percentage = this.getSelectedRiskPercentage(aggregate);
+        if (percentage <= 0) {
+            return getRiskGradientColor(-1);
+        }
+
+        const score = mapHeatScale.riskHeatScores.get(this.normalizeRegionForMap(aggregate.region)) ?? -1;
+        return getRiskGradientColor(score);
+    }
+
+    private buildRiskHeatScores(aggregates: RegionAggregate[]): Map<string, number> {
+        const scores = new Map<string, number>();
+
+        if (this.selectedRiskView === "Total") {
+            return scores;
+        }
+
+        const positivePercentages = aggregates
+            .map((aggregate: RegionAggregate) => ({
+                key: this.normalizeRegionForMap(aggregate.region),
+                percentage: this.getSelectedRiskPercentage(aggregate)
+            }))
+            .filter((item: { key: string; percentage: number }) => item.percentage > 0)
+            .sort((left: { key: string; percentage: number }, right: { key: string; percentage: number }) => (
+                left.percentage - right.percentage
+            ));
+
+        const rankedPercentages = positivePercentages.slice().reverse();
+        const selectedPercentages = this.mapRankingLimit > 0
+            ? rankedPercentages.slice(0, this.mapRankingLimit)
+            : rankedPercentages;
+        const total = selectedPercentages.length;
+
+        selectedPercentages.forEach((item: { key: string; percentage: number }, index: number) => {
+            const score = total <= 1 ? 1 : 1 - (index / (total - 1));
+            scores.set(item.key, score);
+        });
+
+        return scores;
+    }
+
+    private getSelectedRiskPercentage(aggregate: RegionAggregate | undefined): number {
+        if (!aggregate || this.selectedRiskView === "Total" || !aggregate.totalColegios) {
+            return 0;
+        }
+
+        return this.getRiskValue(aggregate.riskBreakdown, this.selectedRiskView) / aggregate.totalColegios;
+    }
+
+    private getGeoJsonRegionName(feature: Feature<Geometry>): string {
+        const properties = feature.properties || {};
+        return String(
+            properties.REGION ||
+            properties.DEPARTAMEN ||
+            properties.NOMBDEP ||
+            properties.name ||
+            ""
+        );
+    }
+
+    private ensureOpenStreetMapTileLayer(map: L.Map): L.TileLayer {
+        return L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+            attribution: "OpenStreetMap",
+            maxZoom: 18,
+            minZoom: 4,
+            crossOrigin: true
+        }).addTo(map);
+    }
+
+    private createRegionTooltip(regionName: string, aggregate: RegionAggregate | undefined): HTMLElement {
+        const tooltip = document.createElement("div");
+        tooltip.className = "region-tooltip-content";
+        const title = document.createElement("strong");
+        title.className = "region-tooltip-title";
+        title.textContent = aggregate?.region || regionName;
+        tooltip.appendChild(title);
+
+        this.getRegionTooltipRows(aggregate).forEach(([label, value, className]: string[]) => {
+            this.appendTooltipRow(tooltip, label, value, className);
+        });
+
+        return tooltip;
+
+        [
+            ["N° Colegios", this.formatInteger(aggregate?.totalColegios || 0)],
+            ["N° Provincias", this.formatInteger(aggregate?.totalProvincias || 0)],
+            ["N° Colegio - Riesgo Bajo", this.formatInteger(aggregate?.riskBreakdown.bajo || 0)],
+            ["N° Colegio - Riesgo Medio", this.formatInteger(aggregate?.riskBreakdown.medio || 0)],
+            ["N° Colegio - Riesgo Alto", this.formatInteger(aggregate?.riskBreakdown.alto || 0)],
+            ["N° Colegio - Riesgo Muy Alto", this.formatInteger(aggregate?.riskBreakdown.muyAlto || 0)]
+        ].forEach(([label, value]: string[]) => {
+            this.appendTooltipRow(tooltip, label, value);
+        });
+
+        return tooltip;
+    }
+
+    private getRegionTooltipRows(aggregate: RegionAggregate | undefined): string[][] {
+        const totalColegios = aggregate?.totalColegios || 0;
+
+        if (this.selectedRiskView !== "Total") {
+            const selectedRiskCount = aggregate
+                ? this.getRiskValue(aggregate.riskBreakdown, this.selectedRiskView)
+                : 0;
+
+            return [
+                ["Colegios", this.formatInteger(totalColegios), "region-tooltip-row-main"],
+                [this.selectedRiskView, this.formatInteger(selectedRiskCount), this.getRiskTooltipClass(this.selectedRiskView)],
+                ["Porcentaje", this.formatPercentFromRatio(this.getSelectedRiskPercentage(aggregate)), "region-tooltip-percent"]
+            ];
+        }
+
+        return [
+            ["Colegios", this.formatInteger(totalColegios), "region-tooltip-row-main"],
+            ["Provincias", this.formatInteger(aggregate?.totalProvincias || 0), "region-tooltip-row-main"],
+            ["Bajo", this.formatInteger(aggregate?.riskBreakdown.bajo || 0), "risk-low"],
+            ["Medio", this.formatInteger(aggregate?.riskBreakdown.medio || 0), "risk-medium"],
+            ["Alto", this.formatInteger(aggregate?.riskBreakdown.alto || 0), "risk-high"],
+            ["Muy alto", this.formatInteger(aggregate?.riskBreakdown.muyAlto || 0), "risk-critical"]
+        ];
+    }
+
+    private getRiskTooltipClass(risk: RiskLevel): string {
+        if (risk === "Bajo") {
+            return "risk-low";
+        }
+
+        if (risk === "Medio") {
+            return "risk-medium";
+        }
+
+        if (risk === "Alto") {
+            return "risk-high";
+        }
+
+        return "risk-critical";
+    }
+
+    private appendTooltipRow(tooltip: HTMLElement, label: string, value: string, className = ""): void {
+        const row = document.createElement("div");
+        row.className = `region-tooltip-row ${className}`.trim();
+        const labelElement = document.createElement("span");
+        labelElement.textContent = label;
+        row.appendChild(labelElement);
+
+        const valueElement = document.createElement("b");
+        valueElement.textContent = value;
+        row.appendChild(valueElement);
+        tooltip.appendChild(row);
+    }
+
+    private removeLeafletMap(): void {
+        this.hideMapContextMenu();
+        if (this.activeMapDrillLayer) {
+            this.activeMapDrillLayer.remove();
+            this.activeMapDrillLayer = null;
+            this.activeMapDrillKey = "";
+        }
+
+        if (this.leafletMap) {
+            this.leafletMap.remove();
+            this.leafletMap = null;
+        }
+    }
+
+    private appendMapResetButton(map: HTMLElement): void {
+        const button = document.createElement("button");
+        button.className = "map-reset-button";
+        button.type = "button";
+        button.textContent = "R";
+        button.title = "Volver al mapa completo";
+        button.onclick = () => {
+            this.resetMapFocus(true);
+            this.renderCurrentView();
+        };
+        map.appendChild(button);
     }
 
     private appendMapNationalSummary(map: HTMLElement, engine: AnalyticsEngine): void {
@@ -1726,21 +2843,99 @@ export class Visual implements IVisual {
         map.appendChild(summary);
     }
 
+    private appendMapRankingControl(map: HTMLElement, engine: AnalyticsEngine): void {
+        const panel = document.createElement("aside");
+        panel.className = "map-ranking-card";
+
+        const header = document.createElement("div");
+        header.className = "map-ranking-header";
+
+        const title = document.createElement("strong");
+        title.textContent = "Ranking";
+        header.appendChild(title);
+
+        const input = document.createElement("input");
+        input.type = "number";
+        input.min = "0";
+        input.max = "26";
+        input.step = "1";
+        input.value = this.mapRankingLimit.toString();
+        input.title = "Cantidad de regiones a colorear";
+        input.onchange = () => {
+            const nextValue = Math.max(0, Math.min(26, Math.floor(Number(input.value) || 0)));
+            this.mapRankingLimit = nextValue;
+            this.renderCurrentView();
+        };
+        header.appendChild(input);
+        panel.appendChild(header);
+
+        const hint = document.createElement("small");
+        hint.textContent = this.selectedRiskView === "Total"
+            ? "Selecciona un riesgo"
+            : `Top por % ${this.selectedRiskView}`;
+        panel.appendChild(hint);
+
+        const list = document.createElement("ol");
+        list.className = "map-ranking-list";
+        this.getMapRankingRows(engine).forEach((row: { region: string; percentage: number; score: number }) => {
+            const item = document.createElement("li");
+
+            const swatch = document.createElement("span");
+            swatch.style.background = getRiskGradientColor(row.score);
+            item.appendChild(swatch);
+
+            const label = document.createElement("b");
+            label.textContent = this.shortRegionLabel(row.region);
+            item.appendChild(label);
+
+            const value = document.createElement("em");
+            value.textContent = this.formatPercentFromRatio(row.percentage);
+            item.appendChild(value);
+            list.appendChild(item);
+        });
+
+        panel.appendChild(list);
+        map.appendChild(panel);
+    }
+
+    private getMapRankingRows(engine: AnalyticsEngine): { region: string; percentage: number; score: number }[] {
+        if (this.selectedRiskView === "Total") {
+            return [];
+        }
+
+        const rows = this.getRegionAggregates(engine)
+            .map((aggregate: RegionAggregate) => ({
+                region: aggregate.region,
+                percentage: this.getSelectedRiskPercentage(aggregate)
+            }))
+            .filter((row: { region: string; percentage: number }) => row.percentage > 0)
+            .sort((left: { region: string; percentage: number }, right: { region: string; percentage: number }) => (
+                right.percentage - left.percentage
+            ));
+        const selectedRows = this.mapRankingLimit > 0 ? rows.slice(0, this.mapRankingLimit) : rows;
+        const total = selectedRows.length;
+
+        return selectedRows.map((row: { region: string; percentage: number }, index: number) => ({
+            ...row,
+            score: total <= 1 ? 1 : 1 - (index / (total - 1))
+        }));
+    }
+
     private appendRiskToggle(map: HTMLElement): void {
         const toggle = document.createElement("div");
         toggle.className = "map-risk-toggle";
 
         const label = document.createElement("span");
-        label.textContent = "Ver por Riesgo:";
+        label.textContent = "Vista por Riesgo:";
         toggle.appendChild(label);
 
-        riskLevels.forEach((risk: RiskLevel) => {
+        riskMapViews.forEach((mode: RiskMapView) => {
             const button = document.createElement("button");
-            button.className = `map-risk-toggle-button${risk === this.selectedRiskView ? " map-risk-toggle-button-active" : ""}`;
+            button.className = `map-risk-toggle-button${mode === this.selectedRiskView ? " map-risk-toggle-button-active" : ""}`;
             button.type = "button";
-            button.textContent = risk;
+            button.textContent = mode;
             button.onclick = () => {
-                this.selectedRiskView = risk;
+                this.selectedRiskView = mode;
                 this.renderCurrentView();
             };
             toggle.appendChild(button);
@@ -1749,69 +2944,71 @@ export class Visual implements IVisual {
         map.appendChild(toggle);
     }
 
-    private showRegionTooltip(
-        tooltip: HTMLElement,
-        map: HTMLElement,
-        regionName: string,
-        aggregate: RegionAggregate | undefined,
-        selectedCount: number,
-        ratio: number,
-        event: MouseEvent
-    ): void {
-        tooltip.replaceChildren();
+    private getSelectedRegionEngine(engine: AnalyticsEngine): AnalyticsEngine {
+        if (!this.selectedRegion) {
+            return engine;
+        }
 
-        const title = document.createElement("strong");
-        title.textContent = aggregate?.region || regionName;
-        tooltip.appendChild(title);
+        const cacheKey = `${this.lastDatasetSignature}|${this.normalizeRegionForMap(this.selectedRegion)}`;
+        if (this.enableSelectedRegionCache && this.selectedRegionAnalyticsCache && this.selectedRegionAnalyticsCacheKey === cacheKey) {
+            return this.selectedRegionAnalyticsCache;
+        }
 
-        const rows = aggregate
-            ? [
-                ["Riesgo seleccionado", this.selectedRiskView],
-                [`Colegios ${this.selectedRiskView}`, this.formatInteger(selectedCount)],
-                ["Total colegios", this.formatInteger(aggregate.totalColegios)],
-                [`% ${this.selectedRiskView}`, this.formatPercent(Number.isFinite(ratio) ? ratio * 100 : 0)],
-                ["Score", aggregate.weightedScore.toFixed(2)],
-                ["Clasificacion", aggregate.weightedRisk]
-            ]
-            : [["Sin datos", "No hay agregados para esta region"]];
+        const selectedKey = this.normalizeRegionForMap(this.selectedRegion);
+        const filteredEngine = this.streamingIndexes.regionAnalytics.get(selectedKey) || AnalyticsEngine.createEmpty();
+        filteredEngine.finalizeBuild();
+        if (this.enableSelectedRegionCache) {
+            this.selectedRegionAnalyticsCache = filteredEngine;
+            this.selectedRegionAnalyticsCacheKey = cacheKey;
+        }
 
-        rows.forEach(([label, value]: string[]) => {
-            const row = document.createElement("div");
-            const labelElement = document.createElement("span");
-            labelElement.textContent = label;
-            row.appendChild(labelElement);
-
-            const valueElement = document.createElement("b");
-            valueElement.textContent = value;
-            row.appendChild(valueElement);
-            tooltip.appendChild(row);
-        });
-
-        tooltip.style.display = "block";
-        this.positionRegionTooltip(tooltip, map, event);
+        return filteredEngine;
     }
 
-    private positionRegionTooltip(tooltip: HTMLElement, map: HTMLElement, event: MouseEvent): void {
-        const rect = map.getBoundingClientRect();
-        const tooltipWidth = tooltip.offsetWidth || 210;
-        const tooltipHeight = tooltip.offsetHeight || 150;
-        const left = Math.min(Math.max(event.clientX - rect.left + 14, 8), rect.width - tooltipWidth - 8);
-        const top = Math.min(Math.max(event.clientY - rect.top + 14, 8), rect.height - tooltipHeight - 8);
-        tooltip.style.left = `${left}px`;
-        tooltip.style.top = `${top}px`;
+    private isRecordInSelectedRegion(record: SourceRecord): boolean {
+        if (!this.selectedRegion) {
+            return true;
+        }
+
+        return this.isRegionNameSelected(record.region);
+    }
+
+    private isSelectedRegion(regionName: string): boolean {
+        const focusedRegion = this.getFocusedRegion();
+        if (!focusedRegion) {
+            return false;
+        }
+
+        return this.matchesRegion(regionName, focusedRegion);
+    }
+
+    private isRegionNameSelected(regionName: string): boolean {
+        if (!this.selectedRegion) {
+            return false;
+        }
+
+        return this.matchesRegion(regionName, this.selectedRegion);
+    }
+
+    private getFocusedRegion(): string | null {
+        return this.selectedRegion || this.autoFocusedRegion;
+    }
+
+    private matchesRegion(regionName: string, selectedRegionName: string): boolean {
+        const selectedRegion = this.normalizeRegionForMap(selectedRegionName);
+        const region = this.normalizeRegionForMap(regionName);
+
+        return region === selectedRegion || this.getRegionAliases(selectedRegion).includes(region);
     }
 
     private getRegionAggregates(engine: AnalyticsEngine): RegionAggregate[] {
         return engine.getRegions().map((summary: BucketSummary) => ({
             region: summary.label,
             totalColegios: summary.colegiosUnicos,
+            totalProvincias: summary.provinciasUnicas,
             montoInversion: summary.montoTotal,
             estudiantesBeneficiarios: summary.beneficiariosTotal,
             numeroSolicitudes: summary.solicitudesUnicas,
-            risk: summary.clasificacion,
-            predominantRisk: this.getPredominantRisk(summary.riesgoColegios),
-            weightedRisk: summary.clasificacion,
-            weightedScore: summary.scoreRiesgo,
             riskBreakdown: summary.riesgoColegios
         }));
     }
@@ -1860,12 +3057,6 @@ export class Visual implements IVisual {
             .replace(/\s+/g, " ");
     }
 
-    private getPredominantRisk(riskBreakdown: RiskBuckets): RiskLevel {
-        return riskLevels.reduce((best: RiskLevel, current: RiskLevel) => (
-            this.getRiskValue(riskBreakdown, current) > this.getRiskValue(riskBreakdown, best) ? current : best
-        ), "Bajo");
-    }
-
     private getRiskValue(riskBreakdown: RiskBuckets, risk: RiskLevel): number {
         if (risk === "Bajo") {
             return riskBreakdown.bajo;
@@ -1882,6 +3073,29 @@ export class Visual implements IVisual {
         return riskBreakdown.muyAlto;
     }
 
+    private addRiskToBreakdown(riskBreakdown: RiskBuckets, value: string): void {
+        const normalized = this.normalizeText(value);
+
+        if (normalized === "BAJO") {
+            riskBreakdown.bajo += 1;
+        } else if (normalized === "MEDIO") {
+            riskBreakdown.medio += 1;
+        } else if (normalized === "ALTO") {
+            riskBreakdown.alto += 1;
+        } else {
+            riskBreakdown.muyAlto += 1;
+        }
+    }
+
+    private hasValidCoordinates(record: SourceRecord): boolean {
+        return Number.isFinite(record.latitud) &&
+            Number.isFinite(record.longitud) &&
+            record.latitud >= -20 &&
+            record.latitud <= 2 &&
+            record.longitud >= -82 &&
+            record.longitud <= -68;
+    }
+
     private shortRegionLabel(region: string): string {
         return region
             .replace("LIMA METROPOLITANA", "LIMA MET.")
@@ -1890,27 +3104,181 @@ export class Visual implements IVisual {
 
     private appendUgmeView(engine: AnalyticsEngine): void {
         const view = document.createElement("section");
-        view.className = "ugme-view";
+        view.className = "dashboard-root ugme-dashboard-view with-internal-filters";
+        this.appendInternalFilterBar(view);
 
-        const backButton = document.createElement("button");
-        backButton.className = "ugme-back-button";
-        backButton.type = "button";
-        backButton.textContent = "< Volver";
-        backButton.onclick = () => {
-            this.currentView = "summary";
-            this.renderCurrentView();
-        };
-        view.appendChild(backButton);
+        const layout = document.createElement("div");
+        layout.className = "main-dashboard-layout";
 
-        const kpi = engine.getUnitKpi("UGME");
-        const card = this.createUnitCard(kpi, true);
-        card.classList.add("ugme-card");
-        view.appendChild(card);
+        const mapPanel = document.createElement("section");
+        mapPanel.className = "map-panel";
+        this.appendPeruRiskMap(mapPanel, engine);
+        layout.appendChild(mapPanel);
+
+        const unitsPanel = this.createUgmeUnitsPanel(engine);
+        layout.appendChild(unitsPanel);
+        view.appendChild(layout);
 
         this.target.appendChild(view);
     }
 
+    private createUgmeUnitsPanel(engine: AnalyticsEngine): HTMLElement {
+        const unitEngine = this.getSelectedRegionEngine(engine);
+        const unitsPanel = document.createElement("section");
+        unitsPanel.className = "units-panel ugme-units-panel";
+
+        this.appendInformationBanner(unitsPanel, unitEngine);
+
+        const title = document.createElement("h1");
+        title.textContent = this.selectedRegion
+            ? `UGME - ${this.selectedRegion}`
+            : "UGME";
+        unitsPanel.appendChild(title);
+
+        const kpi = unitEngine.getUnitKpi("UGME");
+        const card = this.createUnitCard(kpi, true);
+        card.classList.add("ugme-card");
+        unitsPanel.appendChild(card);
+
+        const backButton = document.createElement("button");
+        backButton.className = "floating-next-button floating-back-button";
+        backButton.type = "button";
+        backButton.title = "Volver a la pantalla principal";
+        backButton.setAttribute("aria-label", "Volver a la pantalla principal");
+        backButton.textContent = "<";
+        backButton.onclick = () => this.switchVisualView("summary");
+        unitsPanel.appendChild(backButton);
+
+        return unitsPanel;
+    }
+
+    private appendInformationBanner(container: HTMLElement, engine: AnalyticsEngine): void {
+        const totals = engine.getTotals();
+        const scope = this.getInformationScope(engine);
+        const banner = document.createElement("section");
+        banner.className = `information-banner${scope.isSingleSchool ? " information-banner-school" : ""}`;
+
+        if (scope.header) {
+            const header = document.createElement("div");
+            header.className = "information-banner-header";
+
+            const title = document.createElement("h2");
+            title.textContent = scope.header;
+            header.appendChild(title);
+
+            const info = document.createElement("span");
+            info.textContent = "i";
+            header.appendChild(info);
+            banner.appendChild(header);
+        }
+
+        const scopeTitle = document.createElement("h3");
+        scopeTitle.textContent = scope.scopeTitle;
+        banner.appendChild(scopeTitle);
+
+        const metrics = document.createElement("div");
+        metrics.className = "information-metric-grid";
+        metrics.appendChild(this.createInformationMetric("IE", this.formatInteger(totals.colegiosUnicos), "Instituciones Educativas"));
+        metrics.appendChild(this.createInformationMetric("EB", this.formatInteger(totals.beneficiariosTotal), "Estudiantes Beneficiarios"));
+        banner.appendChild(metrics);
+
+        container.appendChild(banner);
+    }
+
+    private createInformationMetric(icon: string, value: string, label: string): HTMLElement {
+        const card = document.createElement("article");
+        card.className = "information-metric-card";
+
+        const iconElement = document.createElement("span");
+        iconElement.textContent = icon;
+        card.appendChild(iconElement);
+
+        const content = document.createElement("div");
+        const strong = document.createElement("strong");
+        strong.textContent = value;
+        content.appendChild(strong);
+
+        const small = document.createElement("small");
+        small.textContent = label;
+        content.appendChild(small);
+        card.appendChild(content);
+
+        return card;
+    }
+
+    private getInformationScope(engine: AnalyticsEngine): { header: string; scopeTitle: string; isSingleSchool: boolean } {
+        const singleSchool = this.getSingleSchoolDetail(engine);
+        if (singleSchool) {
+            return {
+                header: singleSchool.nombreLocal && singleSchool.nombreLocal !== "-"
+                    ? singleSchool.nombreLocal
+                    : singleSchool.codigoLocal,
+                scopeTitle: [singleSchool.region, singleSchool.provincia, singleSchool.distrito]
+                    .filter((value: string) => !!value && value !== "-")
+                    .join(" / ") || singleSchool.codigoLocal,
+                isSingleSchool: true
+            };
+        }
+
+        const regions = engine.getRegions();
+        if (!regions.length || regions.length > 3) {
+            return {
+                header: "",
+                scopeTitle: this.selectedRegion || "A NIVEL NACIONAL",
+                isSingleSchool: false
+            };
+        }
+
+        if (regions.length === 1) {
+            const region = regions[0];
+            const provincias = engine.getProvincias(region.key);
+            const scopeParts = [region.label];
+
+            if (provincias.length === 1) {
+                const provincia = provincias[0];
+                const distritos = engine.getDistritos(provincia.key);
+                scopeParts.push(provincia.label);
+
+                if (distritos.length === 1) {
+                    scopeParts.push(distritos[0].label);
+                }
+            }
+
+            return {
+                header: "",
+                scopeTitle: scopeParts.join(" / "),
+                isSingleSchool: false
+            };
+        }
+
+        return {
+            header: "",
+            scopeTitle: regions.map((region: BucketSummary) => region.label).join(", "),
+            isSingleSchool: false
+        };
+    }
+
+    private getSingleSchoolDetail(engine: AnalyticsEngine): UnitDetailRow | null {
+        if (engine.getTotals().colegiosUnicos !== 1) {
+            return null;
+        }
+
+        for (const unitRows of this.streamingIndexes.detailRowsByUnit.values()) {
+            for (const row of unitRows.values()) {
+                if (engine.getBucketByColegio(row.codigoLocal) && (!this.selectedRegion || this.isRegionNameSelected(row.region))) {
+                    return row;
+                }
+            }
+        }
+
+        return null;
+    }
+
     private createUnitCard(kpi: UnitKpiSummary, showUgmeDetail: boolean): HTMLElement {
+        if (showUgmeDetail && kpi.unit === "UGME") {
+            return this.createUgmeDetailCard(kpi);
+        }
+
         const theme = this.getUnitTheme(kpi.unit);
         const card = document.createElement("section");
         card.className = `unit-card unit-card-${kpi.unit.toLowerCase()}`;
@@ -1956,6 +3324,73 @@ export class Visual implements IVisual {
         if (showUgmeDetail) {
             this.appendUgmeGroupCards(card, kpi.grupos);
         }
+
+        return card;
+    }
+
+    private createUgmeDetailCard(kpi: UnitKpiSummary): HTMLElement {
+        const theme = this.getUnitTheme("UGME");
+        const card = document.createElement("section");
+        card.className = "ugme-detail-card";
+        card.style.setProperty("--unit-color", theme.color);
+        card.style.setProperty("--unit-bg", theme.background);
+
+        const hero = document.createElement("section");
+        hero.className = "ugme-hero";
+
+        const header = document.createElement("div");
+        header.className = "ugme-hero-header";
+
+        const icon = document.createElement("div");
+        icon.className = "ugme-hero-icon";
+        icon.textContent = "ME";
+        header.appendChild(icon);
+
+        const titleGroup = document.createElement("div");
+        const title = document.createElement("h2");
+        title.textContent = "UGME";
+        titleGroup.appendChild(title);
+
+        const subtitle = document.createElement("p");
+        subtitle.textContent = theme.name;
+        titleGroup.appendChild(subtitle);
+        header.appendChild(titleGroup);
+
+        hero.appendChild(header);
+
+        const kpiGrid = document.createElement("div");
+        kpiGrid.className = "ugme-hero-kpis";
+        [
+            { icon: "RG", label: "N° Regiones", value: this.formatInteger(kpi.regiones) },
+            { icon: "CL", label: "N° Colegios", value: this.formatInteger(kpi.colegios) },
+            { icon: "S/", label: "Monto", value: this.formatMillions(kpi.montoIntervencion) }
+        ].forEach((item: UnitKpiCell) => kpiGrid.appendChild(this.createUgmeHeroKpi(item)));
+        hero.appendChild(kpiGrid);
+        card.appendChild(hero);
+
+        this.appendUgmeGroupSection(card, "MODULARES", this.getUgmeModularGroups(kpi.grupos), "ugme-section-modulares");
+        this.appendUgmeGroupSection(card, "MOBILIARIO Y EQUIPAMIENTO", this.getUgmeMobiliarioGroups(kpi.grupos), "ugme-section-mobiliario");
+
+        return card;
+    }
+
+    private createUgmeHeroKpi(item: UnitKpiCell): HTMLElement {
+        const card = document.createElement("article");
+        card.className = "ugme-hero-kpi";
+
+        const icon = document.createElement("span");
+        icon.textContent = item.icon;
+        card.appendChild(icon);
+
+        const content = document.createElement("div");
+        const value = document.createElement("strong");
+        value.textContent = item.value;
+        content.appendChild(value);
+
+        const label = document.createElement("small");
+        label.textContent = item.label;
+        content.appendChild(label);
+        card.appendChild(content);
 
         return card;
     }
@@ -2006,7 +3441,7 @@ export class Visual implements IVisual {
                 { icon: "EB", label: "Estudiantes Beneficiarios", value: this.formatInteger(kpi.beneficiarios) },
                 { icon: "ER", label: "Solicitudes en revision", value: this.formatInteger(kpi.solicitudesRevision) },
                 { icon: "CU", label: "Solicitudes culminadas", value: this.formatInteger(kpi.solicitudesCulminadas) },
-                { icon: "MI", label: "Monto de Inversion", value: this.formatNumber(kpi.montoIntervencion) }
+                { icon: "MI", label: "Monto", value: this.formatNumber(kpi.montoIntervencion) }
             ];
         }
 
@@ -2031,7 +3466,7 @@ export class Visual implements IVisual {
             return [
                 { icon: "RG", label: "N° Regiones", value: this.formatInteger(kpi.regiones) },
                 { icon: "CL", label: "N° Colegios", value: this.formatInteger(kpi.colegios) },
-                { icon: "MI", label: "Monto de Inversion", value: this.formatNumber(kpi.montoIntervencion) }
+                { icon: "MI", label: "Monto", value: this.formatMillions(kpi.montoIntervencion) }
             ];
         }
 
@@ -2088,7 +3523,7 @@ export class Visual implements IVisual {
             const rows = [
                 ["Cantidad", this.formatInteger(grupo.cantidad)],
                 ["Beneficiarios", this.formatInteger(grupo.beneficiarios)],
-                ["Monto de Inversion", this.formatNumber(grupo.montoIntervencion)]
+                ["Monto", this.formatMillions(grupo.montoIntervencion)]
             ];
 
             rows.forEach(([labelText, valueText]: string[]) => {
@@ -2112,12 +3547,120 @@ export class Visual implements IVisual {
         card.appendChild(grid);
     }
 
+    private appendUgmeGroupSection(container: HTMLElement, titleText: string, grupos: GroupMetricSummary[], className: string): void {
+        const section = document.createElement("section");
+        section.className = `ugme-detail-section ${className}`;
+
+        const title = document.createElement("h3");
+        title.textContent = titleText;
+        section.appendChild(title);
+
+        const grid = document.createElement("div");
+        grid.className = "ugme-detail-group-grid";
+        grupos.forEach((grupo: GroupMetricSummary) => grid.appendChild(this.createUgmeDetailGroupCard(grupo)));
+        section.appendChild(grid);
+        container.appendChild(section);
+    }
+
+    private createUgmeDetailGroupCard(grupo: GroupMetricSummary): HTMLElement {
+        const card = document.createElement("article");
+        const groupClass = this.getUgmeGroupClass(grupo.grupo);
+        card.className = `ugme-detail-group-card ${groupClass}`;
+
+        const header = document.createElement("div");
+        header.className = "ugme-detail-group-header";
+
+        const icon = document.createElement("span");
+        icon.textContent = this.getUgmeGroupIcon(grupo.grupo);
+        header.appendChild(icon);
+
+        const title = document.createElement("h4");
+        title.textContent = grupo.grupo;
+        header.appendChild(title);
+        card.appendChild(header);
+
+        [
+            ["Cantidad", this.formatInteger(grupo.cantidad), "CA"],
+            ["Beneficiarios", this.formatInteger(grupo.beneficiarios), "BE"],
+            ["Monto", this.formatMillions(grupo.montoIntervencion), "S/"]
+        ].forEach(([labelText, valueText, iconText]: string[]) => {
+            const row = document.createElement("div");
+            row.className = "ugme-detail-group-row";
+
+            const label = document.createElement("span");
+            label.textContent = iconText;
+            row.appendChild(label);
+
+            const text = document.createElement("small");
+            text.textContent = labelText;
+            row.appendChild(text);
+
+            const value = document.createElement("strong");
+            value.textContent = valueText;
+            row.appendChild(value);
+            card.appendChild(row);
+        });
+
+        return card;
+    }
+
+    private getUgmeModularGroups(grupos: GroupMetricSummary[]): GroupMetricSummary[] {
+        const modularNames = new Set<string>([
+            "ESCUELA MODULAR",
+            "AULA MODULAR",
+            "KIT DE PARARRAYO",
+            "MODULO SS.HH.",
+            "REDES COMPLEMENTARIAS"
+        ]);
+
+        return grupos.filter((grupo: GroupMetricSummary) => modularNames.has(grupo.grupo));
+    }
+
+    private getUgmeMobiliarioGroups(grupos: GroupMetricSummary[]): GroupMetricSummary[] {
+        const modularNames = new Set<string>([
+            "ESCUELA MODULAR",
+            "AULA MODULAR",
+            "KIT DE PARARRAYO",
+            "MODULO SS.HH.",
+            "REDES COMPLEMENTARIAS"
+        ]);
+
+        return grupos.filter((grupo: GroupMetricSummary) => !modularNames.has(grupo.grupo));
+    }
+
+    private getUgmeGroupIcon(grupo: string): string {
+        const icons: Record<string, string> = {
+            "ESCUELA MODULAR": "ED",
+            "AULA MODULAR": "AU",
+            "KIT DE PARARRAYO": "KP",
+            "MODULO SS.HH.": "SS",
+            "REDES COMPLEMENTARIAS": "RC",
+            MOBILIARIO: "MO",
+            EQUIPAMIENTO: "EQ",
+            LABORATORIOS: "LA",
+            TALLERES: "TA"
+        };
+
+        return icons[grupo] || "ME";
+    }
+
+    private getUgmeGroupClass(grupo: string): string {
+        const classes: Record<string, string> = {
+            MOBILIARIO: "ugme-group-green",
+            EQUIPAMIENTO: "ugme-group-teal",
+            LABORATORIOS: "ugme-group-purple",
+            TALLERES: "ugme-group-orange"
+        };
+
+        return classes[grupo] || "ugme-group-blue";
+    }
+
     private openDetailModal(unit: UnitKpiName): void {
         this.detailModalUnit = unit;
         this.isDetailModalOpen = true;
         this.detailSearchText = "";
         this.detailPage = 1;
-        this.renderCurrentView();
+        this.refreshDetailModal();
     }
 
     private closeDetailModal(): void {
@@ -2125,7 +3668,18 @@ export class Visual implements IVisual {
         this.detailModalUnit = null;
         this.detailSearchText = "";
         this.detailPage = 1;
-        this.renderCurrentView();
+        this.removeDetailModal();
+    }
+
+    private refreshDetailModal(): void {
+        this.removeDetailModal();
+        if (this.isDetailModalOpen && this.detailModalUnit) {
+            this.appendDetailModal(this.detailModalUnit);
+        }
+    }
+
+    private removeDetailModal(): void {
+        this.target.querySelectorAll(".detail-modal-backdrop").forEach((modal: Element) => modal.remove());
     }
 
     private appendDetailModal(unit: UnitKpiName): void {
@@ -2179,7 +3733,7 @@ export class Visual implements IVisual {
         search.oninput = () => {
             this.detailSearchText = search.value;
             this.detailPage = 1;
-            this.renderCurrentView();
+            this.refreshDetailModal();
         };
         toolbar.appendChild(search);
 
@@ -2204,6 +3758,13 @@ export class Visual implements IVisual {
 
         backdrop.appendChild(modal);
         this.target.appendChild(backdrop);
+        window.setTimeout(() => {
+            const activeSearch = backdrop.querySelector(".detail-search-input") as HTMLInputElement | null;
+            if (activeSearch) {
+                activeSearch.focus();
+                activeSearch.setSelectionRange(activeSearch.value.length, activeSearch.value.length);
+            }
+        }, 0);
     }
 
     private appendDetailTable(modal: HTMLElement, unit: UnitKpiName, rows: UnitDetailRow[]): void {
@@ -2260,7 +3821,7 @@ export class Visual implements IVisual {
         previous.disabled = this.detailPage <= 1;
         previous.onclick = () => {
             this.detailPage = Math.max(1, this.detailPage - 1);
-            this.renderCurrentView();
+            this.refreshDetailModal();
         };
         pagination.appendChild(previous);
 
@@ -2274,7 +3835,7 @@ export class Visual implements IVisual {
         next.disabled = this.detailPage >= totalPages;
         next.onclick = () => {
             this.detailPage = Math.min(totalPages, this.detailPage + 1);
-            this.renderCurrentView();
+            this.refreshDetailModal();
         };
         pagination.appendChild(next);
 
@@ -2282,62 +3843,13 @@ export class Visual implements IVisual {
     }
 
     private getUnitSchoolDetails(unit: UnitKpiName): UnitDetailRow[] {
-        const cachedRows = this.detailCacheByUnit.get(unit);
+        const cacheKey = `${this.lastDatasetSignature}|${unit}`;
+        const cachedRows = this.detailCacheByUnit.get(cacheKey);
         if (cachedRows) {
             return cachedRows;
         }
 
-        const detailMap = new Map<string, UnitDetailRow>();
-
-        this.accumulatedRows.forEach((record: SourceRecord) => {
-            const recordUnit = this.normalizeText(record.unidadGerencial) as UnitKpiName;
-            if (recordUnit !== unit) {
-                return;
-            }
-
-            const codigoKey = this.normalizeText(record.codigoLocal);
-            const grupoKey = unit === "UGME" ? this.normalizeText(record.grupo) : "";
-            const key = unit === "UGME" ? `${codigoKey}|${grupoKey}` : codigoKey;
-            const row = detailMap.get(key) || {
-                unit,
-                codigoLocal: record.codigoLocal || "-",
-                nombreLocal: record.nombreLocal || "-",
-                region: record.region || "-",
-                provincia: record.provincia || "-",
-                distrito: record.distrito || "-",
-                grupo: unit === "UGME" ? record.grupo || "-" : undefined,
-                montoIntervencion: 0,
-                beneficiarios: 0,
-                cantidad: 0,
-                solicitudes: new Set<string>(),
-                solicitudesRevision: new Set<string>(),
-                solicitudesCulminadas: new Set<string>(),
-                montoAsignado: 0,
-                montoTransferencia: 0,
-                montoRetirado: 0
-            };
-
-            row.montoIntervencion += Number(record.montoIntervencion) || 0;
-            row.beneficiarios += Number(record.beneficiarios) || 0;
-            row.cantidad += Number(record.cantidad) || 0;
-            row.montoAsignado += Number(record.montoAsignado) || 0;
-            row.montoTransferencia += Number(record.montoTransferencia) || 0;
-            row.montoRetirado += Number(record.montoRetirado) || 0;
-
-            this.addValidDetailDistinct(row.solicitudes, record.idSolicitud);
-            const estado = this.normalizeText(record.estadoSolicitud);
-            if (estado === "EN REVISION" || estado === "REVISION") {
-                this.addValidDetailDistinct(row.solicitudesRevision, record.idSolicitud);
-            }
-
-            if (estado === "CULMINADO" || estado === "CULMINADA" || estado === "CULMINADOS" || estado === "CULMINADAS") {
-                this.addValidDetailDistinct(row.solicitudesCulminadas, record.idSolicitud);
-            }
-
-            detailMap.set(key, row);
-        });
-
-        const rows = Array.from(detailMap.values())
+        const rows = Array.from(this.streamingIndexes.detailRowsByUnit.get(unit)?.values() || [])
             .sort((left: UnitDetailRow, right: UnitDetailRow) => {
                 const byRegion = left.region.localeCompare(right.region);
                 if (byRegion) {
@@ -2347,17 +3859,21 @@ export class Visual implements IVisual {
                 return left.codigoLocal.localeCompare(right.codigoLocal);
             });
 
-        this.detailCacheByUnit.set(unit, rows);
+        this.cacheDetailRows(cacheKey, rows);
         return rows;
     }
 
     private filterDetailRows(rows: UnitDetailRow[]): UnitDetailRow[] {
         const searchText = this.normalizeText(this.detailSearchText);
+        const regionRows = this.selectedRegion
+            ? rows.filter((row: UnitDetailRow) => this.isRegionNameSelected(row.region))
+            : rows;
+
         if (!searchText) {
-            return rows;
+            return regionRows;
         }
 
-        return rows.filter((row: UnitDetailRow) => [
+        return regionRows.filter((row: UnitDetailRow) => [
             row.codigoLocal,
             row.nombreLocal,
             row.region,
@@ -2383,7 +3899,7 @@ export class Visual implements IVisual {
                 { label: "Estudiantes beneficiarios", value: (row: UnitDetailRow) => this.formatInteger(row.beneficiarios) },
                 { label: "Solicitudes en revision", value: (row: UnitDetailRow) => this.formatInteger(row.solicitudesRevision.size) },
                 { label: "Solicitudes culminadas", value: (row: UnitDetailRow) => this.formatInteger(row.solicitudesCulminadas.size) },
-                { label: "Monto de inversion", value: (row: UnitDetailRow) => this.formatCurrencyNoDecimals(row.montoIntervencion) }
+                { label: "Monto", value: (row: UnitDetailRow) => this.formatMillions(row.montoIntervencion) }
             ];
         }
 
@@ -2451,6 +3967,13 @@ export class Visual implements IVisual {
         panel.appendChild(message);
 
         this.target.appendChild(panel);
+    }
+
+    private appendLoadingStatusBadge(diagnostics: TableDiagnostics): void {
+        const badge = document.createElement("div");
+        badge.className = "loading-status-badge";
+        badge.textContent = `Actualizando datos: ${this.formatInteger(diagnostics.accumulatedFilas)} filas`;
+        this.target.appendChild(badge);
     }
 
     private appendLoadingPanel(diagnostics: TableDiagnostics): void {
@@ -2561,7 +4084,7 @@ export class Visual implements IVisual {
             return [
                 ["N° Regiones", this.formatInteger(kpi.regiones)],
                 ["N° Colegios", this.formatInteger(kpi.colegios)],
-                ["Monto de Inversión", this.formatNumber(kpi.montoIntervencion)]
+                ["Monto", this.formatMillions(kpi.montoIntervencion)]
             ];
         }
 
@@ -2582,7 +4105,7 @@ export class Visual implements IVisual {
             "Grupo",
             "Cantidad",
             "Beneficiarios",
-            "Monto de Inversión"
+            "Monto"
         ]);
         const tbody = document.createElement("tbody");
 
@@ -2591,7 +4114,7 @@ export class Visual implements IVisual {
                 grupo.grupo,
                 this.formatInteger(grupo.cantidad),
                 this.formatInteger(grupo.beneficiarios),
-                this.formatNumber(grupo.montoIntervencion)
+                this.formatMillions(grupo.montoIntervencion)
             ]);
         });
 
@@ -2615,9 +4138,7 @@ export class Visual implements IVisual {
             ["distritos", totals.distritosUnicos.toString()],
             ["unidades gerenciales", totals.unidadesUnicas.toString()],
             ["monto total", this.formatNumber(totals.montoTotal)],
-            ["% critico global", this.formatPercent(totals.porcentajeCritico)],
-            ["score global", totals.scoreRiesgo.toFixed(2)],
-            ["clasificacion global", totals.clasificacion]
+            ["% critico global", this.formatPercent(totals.porcentajeCritico)]
         ]);
     }
 
@@ -2740,9 +4261,7 @@ export class Visual implements IVisual {
             "Medio",
             "Alto",
             "Muy Alto",
-            "% critico",
-            "Score riesgo",
-            "Clasificacion"
+            "% critico"
         ]);
         const tbody = document.createElement("tbody");
         const summaries = engine.getRegions();
@@ -2758,9 +4277,7 @@ export class Visual implements IVisual {
                 summary.riesgo.medio.toString(),
                 summary.riesgo.alto.toString(),
                 summary.riesgo.muyAlto.toString(),
-                this.formatPercent(summary.porcentajeCritico),
-                summary.scoreRiesgo.toFixed(2),
-                summary.clasificacion
+                this.formatPercent(summary.porcentajeCritico)
             ]);
         });
 
@@ -2775,9 +4292,7 @@ export class Visual implements IVisual {
             totals.riesgo.medio.toString(),
             totals.riesgo.alto.toString(),
             totals.riesgo.muyAlto.toString(),
-            this.formatPercent(totals.porcentajeCritico),
-            totals.scoreRiesgo.toFixed(2),
-            totals.clasificacion
+            this.formatPercent(totals.porcentajeCritico)
         ], "summary-total-row");
 
         table.appendChild(tbody);
@@ -2795,8 +4310,7 @@ export class Visual implements IVisual {
             "Colegios unicos",
             "Solicitudes unicas",
             "Monto total",
-            "% critico",
-            "Clasificacion"
+            "% critico"
         ]);
         const tbody = document.createElement("tbody");
 
@@ -2807,8 +4321,7 @@ export class Visual implements IVisual {
                 summary.colegiosUnicos.toString(),
                 summary.solicitudesUnicas.toString(),
                 this.formatNumber(summary.montoTotal),
-                this.formatPercent(summary.porcentajeCritico),
-                summary.clasificacion
+                this.formatPercent(summary.porcentajeCritico)
             ]);
         });
 
@@ -2954,66 +4467,196 @@ export class Visual implements IVisual {
         this.target.appendChild(paragraph);
     }
 
+    private logDataFlow(label: string, details: Record<string, unknown>): void {
+        if (!this.enableRuntimeLogs) {
+            return;
+        }
+
+        // Runtime-only diagnostics for Power BI Desktop filtering/segment behavior.
+        console.group(`DataView flow #${this.updateCount}: ${label}`);
+        Object.entries(details).forEach(([key, value]: [string, unknown]) => {
+            console.log(key, value);
+        });
+        console.groupEnd();
+    }
+
+    private getCachedAnalytics(datasetSignature: string): AnalyticsEngine | null {
+        const cached = this.analyticsCacheBySignature.get(datasetSignature);
+        if (!cached) {
+            return null;
+        }
+
+        cached.lastUsed = ++this.cacheUseSequence;
+        return cached.analytics;
+    }
+
+    private cacheAnalytics(datasetSignature: string, analytics: AnalyticsEngine, rowCount: number): void {
+        this.analyticsCacheBySignature.set(datasetSignature, {
+            analytics,
+            datasetSignature,
+            rowCount,
+            lastUsed: ++this.cacheUseSequence
+        });
+        this.pruneAnalyticsCache();
+    }
+
+    private pruneAnalyticsCache(): void {
+        if (this.analyticsCacheBySignature.size <= this.maxAnalyticsCacheEntries) {
+            return;
+        }
+
+        const entries = Array.from(this.analyticsCacheBySignature.values())
+            .sort((left: AnalyticsCacheEntry, right: AnalyticsCacheEntry) => left.lastUsed - right.lastUsed);
+        const entriesToDelete = entries.slice(0, this.analyticsCacheBySignature.size - this.maxAnalyticsCacheEntries);
+
+        entriesToDelete.forEach((entry: AnalyticsCacheEntry) => {
+            this.analyticsCacheBySignature.delete(entry.datasetSignature);
+        });
+    }
+
+    private cacheDetailRows(cacheKey: string, rows: UnitDetailRow[]): void {
+        this.detailCacheByUnit.set(cacheKey, rows);
+
+        if (this.detailCacheByUnit.size <= this.maxDetailCacheEntries) {
+            return;
+        }
+
+        const keysToDelete = Array.from(this.detailCacheByUnit.keys())
+            .slice(0, this.detailCacheByUnit.size - this.maxDetailCacheEntries);
+        keysToDelete.forEach((key: string) => this.detailCacheByUnit.delete(key));
+    }
+
     private buildDatasetSignature(columns: DataViewMetadataColumn[], hasMoreData: boolean): string {
-        const columnNames = columns.map((column: DataViewMetadataColumn) => column.queryName || column.displayName || "").join(",");
-        const firstKey = this.accumulatedRows.length ? this.recordKey(this.accumulatedRows[0]) : "";
-        const lastKey = this.accumulatedRows.length ? this.recordKey(this.accumulatedRows[this.accumulatedRows.length - 1]) : "";
+        if (!this.enableAnalyticsCache) {
+            return [
+                `rows=${this.accumulatedRowCount}`,
+                `segment=${hasMoreData}`,
+                this.buildColumnSignature(columns)
+            ].join("|");
+        }
 
         return [
-            `rows=${this.accumulatedRows.length}`,
-            `cols=${columns.length}`,
+            `rows=${this.accumulatedRowCount}`,
             `segment=${hasMoreData}`,
-            columnNames,
-            `first=${firstKey}`,
-            `last=${lastKey}`
+            this.buildColumnSignature(columns),
+            this.buildRecordFingerprint(this.accumulatedRows)
         ].join("|");
     }
 
     private buildIncomingDataSignature(records: SourceRecord[], columns: DataViewMetadataColumn[], hasMoreData: boolean): string {
-        const columnNames = columns.map((column: DataViewMetadataColumn) => column.queryName || column.displayName || "").join(",");
-        const firstKey = records.length ? this.recordKey(records[0]) : "";
-        const lastKey = records.length ? this.recordKey(records[records.length - 1]) : "";
-
         return [
             `rows=${records.length}`,
-            `cols=${columns.length}`,
             `segment=${hasMoreData}`,
-            columnNames,
-            `first=${firstKey}`,
-            `last=${lastKey}`
+            this.buildColumnSignature(columns),
+            this.buildRecordBoundarySignature(records)
         ].join("|");
+    }
+
+    private buildRecordBoundarySignature(records: SourceRecord[]): string {
+        if (!records.length) {
+            return "empty";
+        }
+
+        return [
+            `first=${this.recordKey(records[0])}`,
+            `last=${this.recordKey(records[records.length - 1])}`
+        ].join("|");
+    }
+
+    private buildColumnSignature(columns: DataViewMetadataColumn[]): string {
+        return columns
+            .map((column: DataViewMetadataColumn) => column.queryName || column.displayName || "")
+            .join(",");
+    }
+
+    private buildRecordFingerprint(records: SourceRecord[]): string {
+        if (!records.length) {
+            return "empty";
+        }
+
+        let xorHash = 0;
+        let sumHash = 0;
+        let amountTotal = 0;
+        let beneficiaryTotal = 0;
+
+        for (const record of records) {
+            const rowHash = this.hashString([
+                record.region,
+                record.provincia,
+                record.distrito,
+                record.codigoLocal,
+                record.idSolicitud,
+                record.unidadGerencial,
+                record.estadoSolicitud,
+                record.nivelRiesgo,
+                record.montoInversion
+            ].join("|"));
+            xorHash ^= rowHash;
+            sumHash = (sumHash + (rowHash >>> 0)) >>> 0;
+            amountTotal += record.montoInversion || 0;
+            beneficiaryTotal += record.beneficiarios || 0;
+        }
+
+        return [
+            `xor=${xorHash >>> 0}`,
+            `sum=${sumHash}`,
+            `amount=${Math.round(amountTotal * 100) / 100}`,
+            `benef=${beneficiaryTotal}`
+        ].join("|");
+    }
+
+    private hashString(value: string): number {
+        let hash = 2166136261;
+
+        for (let index = 0; index < value.length; index += 1) {
+            hash ^= value.charCodeAt(index);
+            hash = Math.imul(hash, 16777619);
+        }
+
+        return hash;
     }
 
     private resetAccumulationIfDatasetChanged(
         records: SourceRecord[],
         columns: DataViewMetadataColumn[],
-        hasMoreData: boolean
-    ): void {
+        hasMoreData: boolean,
+        operationKind?: powerbi.VisualDataChangeOperationKind
+    ): boolean {
+        const columnSignature = this.buildColumnSignature(columns);
         const incomingSignature = this.buildIncomingDataSignature(records, columns, hasMoreData);
+        const isCreateOperation = operationKind === powerbi.VisualDataChangeOperationKind.Create;
+        const columnsChanged = !!this.lastColumnSignature && columnSignature !== this.lastColumnSignature;
         const startsNewSegmentedLoad = this.allDataLoaded && hasMoreData && !this.isFetching;
         const incomingChangedAfterComplete = this.allDataLoaded &&
             !this.isFetching &&
             !!this.lastIncomingDataSignature &&
-            incomingSignature !== this.lastIncomingDataSignature &&
-            !this.recordsAlreadyAccumulated(records);
+            incomingSignature !== this.lastIncomingDataSignature;
 
-        if (startsNewSegmentedLoad || incomingChangedAfterComplete) {
-            this.accumulatedRows = [];
-            this.accumulatedRowKeys = new Set<string>();
-            this.accumulatedRowCount = 0;
-            this.fetchCount = 0;
-            this.analyticsCache = null;
-            this.detailCacheByUnit = new Map<string, UnitDetailRow[]>();
-            this.lastDatasetSignature = "";
-            this.segmentLoadStartTime = undefined;
-            this.allDataLoaded = false;
+        if (columnsChanged) {
+            this.analyticsCacheBySignature = new Map<string, AnalyticsCacheEntry>();
         }
 
-        this.lastIncomingDataSignature = incomingSignature;
-    }
+        if (isCreateOperation || columnsChanged || startsNewSegmentedLoad || incomingChangedAfterComplete) {
+            this.resetStreamingState();
+            this.fetchCount = 0;
+            this.analyticsCache = null;
+            this.incrementalAnalytics = null;
+            this.selectedRegionAnalyticsCache = null;
+            this.selectedRegionAnalyticsCacheKey = "";
+            this.lastDatasetSignature = "";
+            this.lastAccumulatedIncomingSignature = "";
+            this.segmentLoadStartTime = undefined;
+            this.allDataLoaded = false;
+            this.selectedRegion = null;
+            this.autoFocusedRegion = null;
+            this.suppressedAutoFocusSignature = "";
+            this.activeMapDrillKey = "";
+        }
 
-    private recordsAlreadyAccumulated(records: SourceRecord[]): boolean {
-        return records.length > 0 && records.every((record: SourceRecord) => this.accumulatedRowKeys.has(this.recordKey(record)));
+        this.lastColumnSignature = columnSignature;
+        this.lastIncomingDataSignature = incomingSignature;
+
+        return isCreateOperation || columnsChanged || startsNewSegmentedLoad || incomingChangedAfterComplete;
     }
 
     private hasMissingRole(columnIndexes: ColumnIndexes): boolean {
@@ -3106,6 +4749,16 @@ export class Visual implements IVisual {
         })}`;
     }
 
+    private formatMillions(value: number): string {
+        const millions = value / 1_000_000;
+        const fractionDigits = Math.abs(millions) < 100 ? 1 : 0;
+
+        return `S/ ${millions.toLocaleString(undefined, {
+            maximumFractionDigits: fractionDigits,
+            minimumFractionDigits: fractionDigits
+        })} M`;
+    }
+
     private formatDecimal(value: number): string {
         return value.toLocaleString(undefined, {
             maximumFractionDigits: 2,
@@ -3121,6 +4774,14 @@ export class Visual implements IVisual {
 
     private formatPercent(value: number): string {
         return `${value.toFixed(1)}%`;
+    }
+
+    private formatPercentFromRatio(value: number): string {
+        if (!Number.isFinite(value)) {
+            return "0.00%";
+        }
+
+        return `${(value * 100).toFixed(2)}%`;
     }
 
     private formatMs(value: number): string {
@@ -3149,11 +4810,7 @@ export class Visual implements IVisual {
 
     private recordKey(record: SourceRecord): string {
         return [
-            this.valueKey(record.region),
-            this.valueKey(record.provincia),
-            this.valueKey(record.distrito),
             this.valueKey(record.codigoLocal),
-            this.valueKey(record.nombreLocal),
             this.valueKey(record.idSolicitud),
             this.valueKey(record.unidadGerencial),
             this.valueKey(record.estadoSolicitud),
@@ -3164,10 +4821,7 @@ export class Visual implements IVisual {
             record.cantidad.toString(),
             record.montoAsignado.toString(),
             record.montoTransferencia.toString(),
-            record.montoRetirado.toString(),
-            record.montoInversion.toString(),
-            record.latitud.toString(),
-            record.longitud.toString()
+            record.montoRetirado.toString()
         ].join("|");
     }
 }

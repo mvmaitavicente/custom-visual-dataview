@@ -170,12 +170,20 @@
                     ],
                     "dataReductionAlgorithm": {
                         "window": {
-                            "count": 150000
+                            "count": 30000
                         }
                     }
                 }
             }
         }
     ],
-    "privileges": []
+    "privileges": [
+        {
+            "name": "WebAccess",
+            "essential": false,
+            "parameters": [
+                "https://tile.openstreetmap.org"
+            ]
+        }
+    ]
 }

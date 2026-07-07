@@ -8,6 +8,8 @@
         "rootDir": ".",
         "outDir": "./.tmp/build/",
         "moduleResolution": "node",
+        "resolveJsonModule": true,
+        "esModuleInterop": true,
         "ignoreDeprecations": "5.0",
         "declaration": true,
         "lib": [
