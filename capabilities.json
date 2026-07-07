@@ -1,6 +1,11 @@
 {
     "dataRoles": [
         {
+            "displayName": "Unidad Gerencial",
+            "name": "unidadGerencial",
+            "kind": "Grouping"
+        },
+        {
             "displayName": "Region",
             "name": "region",
             "kind": "Grouping"
@@ -11,48 +16,18 @@
             "kind": "Grouping"
         },
         {
-            "displayName": "Distrito",
-            "name": "distrito",
-            "kind": "Grouping"
-        },
-        {
             "displayName": "Codigo Local",
             "name": "codigoLocal",
             "kind": "Grouping"
         },
         {
-            "displayName": "Id Solicitud",
-            "name": "idSolicitud",
-            "kind": "Grouping"
-        },
-        {
-            "displayName": "Unidad Gerencial",
-            "name": "unidadGerencial",
-            "kind": "Grouping"
-        },
-        {
-            "displayName": "Estado Solicitud",
-            "name": "estadoSolicitud",
-            "kind": "Grouping"
-        },
-        {
-            "displayName": "Nivel Riesgo",
-            "name": "nivelRiesgo",
-            "kind": "Grouping"
-        },
-        {
-            "displayName": "Monto Inversion",
-            "name": "montoInversion",
+            "displayName": "Monto Intervencion",
+            "name": "montoIntervencion",
             "kind": "Measure"
         },
         {
-            "displayName": "Latitud",
-            "name": "latitud",
-            "kind": "Measure"
-        },
-        {
-            "displayName": "Longitud",
-            "name": "longitud",
+            "displayName": "Beneficiarios",
+            "name": "beneficiarios",
             "kind": "Measure"
         }
     ],
@@ -63,64 +38,39 @@
                 "rows": {
                     "select": [
                         {
-                            "for": {
-                                "in": "region"
+                            "bind": {
+                                "to": "unidadGerencial"
                             }
                         },
                         {
-                            "for": {
-                                "in": "provincia"
+                            "bind": {
+                                "to": "region"
                             }
                         },
                         {
-                            "for": {
-                                "in": "distrito"
+                            "bind": {
+                                "to": "provincia"
                             }
                         },
                         {
-                            "for": {
-                                "in": "codigoLocal"
+                            "bind": {
+                                "to": "codigoLocal"
                             }
                         },
                         {
-                            "for": {
-                                "in": "idSolicitud"
+                            "bind": {
+                                "to": "montoIntervencion"
                             }
                         },
                         {
-                            "for": {
-                                "in": "unidadGerencial"
-                            }
-                        },
-                        {
-                            "for": {
-                                "in": "estadoSolicitud"
-                            }
-                        },
-                        {
-                            "for": {
-                                "in": "nivelRiesgo"
-                            }
-                        },
-                        {
-                            "for": {
-                                "in": "montoInversion"
-                            }
-                        },
-                        {
-                            "for": {
-                                "in": "latitud"
-                            }
-                        },
-                        {
-                            "for": {
-                                "in": "longitud"
+                            "bind": {
+                                "to": "beneficiarios"
                             }
                         }
                     ],
                     "dataReductionAlgorithm": {
                         "window": {
-                            "count": 30000
+                            "count": 150000
                         }
                     }
                 }

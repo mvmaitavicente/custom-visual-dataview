@@ -30,18 +30,32 @@
 .data-view-diagnostic dd {
   margin: 0;
 }
-.data-view-diagnostic .fetch-more-button {
-  background: #f7f7f7;
-  border: 1px solid #8a8a8a;
-  color: #1f1f1f;
-  cursor: pointer;
-  font-family: inherit;
-  font-size: 12px;
+.data-view-diagnostic .unit-kpi-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   margin: 0 0 12px;
-  padding: 6px 10px;
 }
-.data-view-diagnostic .fetch-more-button:hover {
-  background: #eeeeee;
+.data-view-diagnostic .unit-kpi-card {
+  border: 1px solid #d0d0d0;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 10px;
+}
+.data-view-diagnostic .unit-kpi-card h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 8px;
+}
+.data-view-diagnostic .unit-kpi-list {
+  display: grid;
+  grid-template-columns: 1fr max-content;
+  margin: 0;
+  row-gap: 6px;
+}
+.data-view-diagnostic .unit-kpi-list dd {
+  font-weight: 600;
+  text-align: right;
 }
 .data-view-diagnostic table {
   border-collapse: collapse;

@@ -35,19 +35,36 @@
         margin: 0;
     }
 
-    .fetch-more-button {
-        background: #f7f7f7;
-        border: 1px solid #8a8a8a;
-        color: #1f1f1f;
-        cursor: pointer;
-        font-family: inherit;
-        font-size: 12px;
+    .unit-kpi-grid {
+        display: grid;
+        gap: 10px;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
         margin: 0 0 12px;
-        padding: 6px 10px;
     }
 
-    .fetch-more-button:hover {
-        background: #eeeeee;
+    .unit-kpi-card {
+        border: 1px solid #d0d0d0;
+        border-radius: 6px;
+        background: #ffffff;
+        padding: 10px;
+    }
+
+    .unit-kpi-card h3 {
+        font-size: 14px;
+        font-weight: 600;
+        margin: 0 0 8px;
+    }
+
+    .unit-kpi-list {
+        display: grid;
+        grid-template-columns: 1fr max-content;
+        margin: 0;
+        row-gap: 6px;
+    }
+
+    .unit-kpi-list dd {
+        font-weight: 600;
+        text-align: right;
     }
 
     table {
