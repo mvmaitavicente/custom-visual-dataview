@@ -20,6 +20,8 @@ import { VisualFormattingSettingsModel } from "./settings";
 
 type RiskLevel = "Bajo" | "Medio" | "Alto" | "Muy Alto";
 
+const riskLevels: RiskLevel[] = ["Bajo", "Medio", "Alto", "Muy Alto"];
+
 interface ColumnIndexes {
     region: number;
     provincia: number;
@@ -71,6 +73,62 @@ interface RiskBuckets {
     muyAlto: number;
 }
 
+interface RiskSetBuckets {
+    bajo: Set<string>;
+    medio: Set<string>;
+    alto: Set<string>;
+    muyAlto: Set<string>;
+}
+
+interface MapRegionShape {
+    name: string;
+    path: string;
+    labelX: number;
+    labelY: number;
+}
+
+interface RegionAggregate {
+    region: string;
+    totalColegios: number;
+    montoInversion: number;
+    estudiantesBeneficiarios: number;
+    numeroSolicitudes: number;
+    risk: RiskLevel;
+    predominantRisk: RiskLevel;
+    weightedRisk: RiskLevel;
+    weightedScore: number;
+    riskBreakdown: RiskBuckets;
+}
+
+const peruRegionShapes: MapRegionShape[] = [
+    { name: "TUMBES", path: "M120 45 L190 52 L180 95 L115 88 Z", labelX: 150, labelY: 72 },
+    { name: "PIURA", path: "M100 92 L205 98 L218 170 L168 196 L112 170 Z", labelX: 158, labelY: 142 },
+    { name: "LAMBAYEQUE", path: "M126 180 L205 178 L210 225 L135 230 Z", labelX: 170, labelY: 205 },
+    { name: "CAJAMARCA", path: "M210 105 L305 115 L318 230 L214 225 L205 170 Z", labelX: 265, labelY: 170 },
+    { name: "AMAZONAS", path: "M315 92 L430 115 L405 245 L318 230 L305 115 Z", labelX: 370, labelY: 170 },
+    { name: "LORETO", path: "M430 80 L760 130 L790 320 L650 395 L520 345 L405 245 Z", labelX: 615, labelY: 235 },
+    { name: "LA LIBERTAD", path: "M145 230 L250 232 L264 310 L170 318 Z", labelX: 205, labelY: 274 },
+    { name: "SAN MARTIN", path: "M325 235 L420 252 L445 390 L338 375 L264 310 Z", labelX: 370, labelY: 315 },
+    { name: "ANCASH", path: "M172 318 L280 314 L305 405 L220 440 L175 390 Z", labelX: 235, labelY: 375 },
+    { name: "HUANUCO", path: "M305 405 L338 375 L452 395 L460 505 L345 510 Z", labelX: 390, labelY: 450 },
+    { name: "UCAYALI", path: "M460 505 L452 395 L650 395 L705 595 L565 655 Z", labelX: 570, labelY: 520 },
+    { name: "PASCO", path: "M345 510 L460 505 L475 575 L370 590 Z", labelX: 415, labelY: 548 },
+    { name: "LIMA PROVINCIAS", path: "M220 440 L345 510 L370 590 L318 660 L225 585 Z", labelX: 285, labelY: 555 },
+    { name: "LIMA METROPOLITANA", path: "M212 590 L246 600 L238 635 L205 625 Z", labelX: 226, labelY: 615 },
+    { name: "CALLAO", path: "M190 600 L210 604 L205 628 L185 622 Z", labelX: 198, labelY: 616 },
+    { name: "JUNIN", path: "M370 590 L475 575 L510 675 L400 710 L318 660 Z", labelX: 425, labelY: 642 },
+    { name: "MADRE DE DIOS", path: "M650 600 L790 560 L842 705 L700 740 L565 655 Z", labelX: 710, labelY: 660 },
+    { name: "CUSCO", path: "M510 675 L565 655 L700 740 L642 860 L500 802 Z", labelX: 595, labelY: 750 },
+    { name: "HUANCAVELICA", path: "M290 662 L400 710 L392 790 L290 760 Z", labelX: 340, labelY: 735 },
+    { name: "ICA", path: "M225 585 L290 662 L290 760 L240 790 L192 700 Z", labelX: 250, labelY: 695 },
+    { name: "AYACUCHO", path: "M392 790 L400 710 L500 802 L470 900 L360 858 Z", labelX: 430, labelY: 810 },
+    { name: "APURIMAC", path: "M470 900 L500 802 L595 868 L550 940 Z", labelX: 520, labelY: 880 },
+    { name: "AREQUIPA", path: "M240 790 L360 858 L470 900 L428 1040 L275 980 Z", labelX: 350, labelY: 930 },
+    { name: "PUNO", path: "M595 868 L642 860 L742 980 L660 1090 L550 940 Z", labelX: 635, labelY: 950 },
+    { name: "MOQUEGUA", path: "M428 1040 L550 940 L575 1035 L500 1100 Z", labelX: 500, labelY: 1018 },
+    { name: "TACNA", path: "M500 1100 L575 1035 L660 1090 L610 1160 L510 1165 Z", labelX: 570, labelY: 1120 }
+];
+
 interface MetricBucket {
     key: string;
     label: string;
@@ -82,12 +140,14 @@ interface MetricBucket {
     distritos: Set<string>;
     unidades: Set<string>;
     montoTotal: number;
+    beneficiariosTotal: number;
     riesgo: {
         bajo: number;
         medio: number;
         alto: number;
         muyAlto: number;
     };
+    riesgoColegios: RiskSetBuckets;
 }
 
 interface AnalyticsResult {
@@ -117,7 +177,9 @@ interface BucketSummary {
     distritosUnicos: number;
     unidadesUnicas: number;
     montoTotal: number;
+    beneficiariosTotal: number;
     riesgo: RiskBuckets;
+    riesgoColegios: RiskBuckets;
     bajo: number;
     medio: number;
     alto: number;
@@ -349,6 +411,32 @@ function measure<T>(label: string, fn: () => T): { value: T; ms: number } {
     const end = performance.now();
     console.log(`${label} ms`, end - start);
     return { value, ms: end - start };
+}
+
+function getRiskRatioColor(ratio: number): string {
+    if (!Number.isFinite(ratio) || ratio < 0) {
+        return "#d1d5db";
+    }
+
+    const clamped = Math.max(0, Math.min(1, ratio));
+
+    if (clamped <= 0.2) {
+        return "#86efac";
+    }
+
+    if (clamped <= 0.4) {
+        return "#d9f99d";
+    }
+
+    if (clamped <= 0.6) {
+        return "#fde68a";
+    }
+
+    if (clamped <= 0.8) {
+        return "#fdba74";
+    }
+
+    return "#ef4444";
 }
 
 class AnalyticsEngine {
@@ -635,11 +723,18 @@ class AnalyticsEngine {
             distritos: new Set<string>(),
             unidades: new Set<string>(),
             montoTotal: 0,
+            beneficiariosTotal: 0,
             riesgo: {
                 bajo: 0,
                 medio: 0,
                 alto: 0,
                 muyAlto: 0
+            },
+            riesgoColegios: {
+                bajo: new Set<string>(),
+                medio: new Set<string>(),
+                alto: new Set<string>(),
+                muyAlto: new Set<string>()
             }
         };
     }
@@ -665,15 +760,20 @@ class AnalyticsEngine {
         bucket.distritos.add(recordKeys.distritoKey);
         bucket.unidades.add(recordKeys.unidadKey);
         bucket.montoTotal += record.montoInversion;
+        bucket.beneficiariosTotal += Number(record.beneficiarios) || 0;
 
         if (recordKeys.riesgoLabel === "Bajo") {
             bucket.riesgo.bajo += 1;
+            bucket.riesgoColegios.bajo.add(recordKeys.colegioKey);
         } else if (recordKeys.riesgoLabel === "Medio") {
             bucket.riesgo.medio += 1;
+            bucket.riesgoColegios.medio.add(recordKeys.colegioKey);
         } else if (recordKeys.riesgoLabel === "Alto") {
             bucket.riesgo.alto += 1;
+            bucket.riesgoColegios.alto.add(recordKeys.colegioKey);
         } else {
             bucket.riesgo.muyAlto += 1;
+            bucket.riesgoColegios.muyAlto.add(recordKeys.colegioKey);
         }
     }
 
@@ -884,7 +984,14 @@ class AnalyticsEngine {
             distritosUnicos: bucket.distritos.size,
             unidadesUnicas: bucket.unidades.size,
             montoTotal: bucket.montoTotal,
+            beneficiariosTotal: bucket.beneficiariosTotal,
             riesgo: bucket.riesgo,
+            riesgoColegios: {
+                bajo: bucket.riesgoColegios.bajo.size,
+                medio: bucket.riesgoColegios.medio.size,
+                alto: bucket.riesgoColegios.alto.size,
+                muyAlto: bucket.riesgoColegios.muyAlto.size
+            },
             bajo: bucket.riesgo.bajo,
             medio: bucket.riesgo.medio,
             alto: bucket.riesgo.alto,
@@ -1102,6 +1209,9 @@ export class Visual implements IVisual {
     private segmentLoadStartTime?: number;
     private updateCount = 0;
     private currentView: VisualView = "summary";
+    private selectedRiskView: RiskLevel = "Alto";
+    private selectedRegion: string | null = null;
+    private warnedMissingRegionMatches: Set<string> = new Set<string>();
     private latestDiagnostics: TableDiagnostics | null = null;
     private detailModalUnit: UnitKpiName | null = null;
     private isDetailModalOpen = false;
@@ -1468,11 +1578,22 @@ export class Visual implements IVisual {
 
     private appendSummaryView(engine: AnalyticsEngine): void {
         const view = document.createElement("section");
-        view.className = "unit-summary-view";
+        view.className = "dashboard-root";
+
+        const layout = document.createElement("div");
+        layout.className = "main-dashboard-layout";
+
+        const mapPanel = document.createElement("section");
+        mapPanel.className = "map-panel";
+        this.appendPeruRiskMap(mapPanel, engine);
+        layout.appendChild(mapPanel);
+
+        const unitsPanel = document.createElement("section");
+        unitsPanel.className = "units-panel";
 
         const title = document.createElement("h1");
         title.textContent = "RESUMEN POR UNIDADES GERENCIALES";
-        view.appendChild(title);
+        unitsPanel.appendChild(title);
 
         const grid = document.createElement("div");
         grid.className = "unit-grid";
@@ -1481,19 +1602,290 @@ export class Visual implements IVisual {
             grid.appendChild(this.createUnitCard(engine.getUnitKpi(unit), false));
         });
 
-        view.appendChild(grid);
+        unitsPanel.appendChild(grid);
 
         const nextButton = document.createElement("button");
         nextButton.className = "floating-next-button";
         nextButton.type = "button";
-        nextButton.textContent = "Ver UGME";
+        nextButton.textContent = ">";
         nextButton.onclick = () => {
             this.currentView = "ugme";
             this.renderCurrentView();
         };
-        view.appendChild(nextButton);
+        unitsPanel.appendChild(nextButton);
+
+        layout.appendChild(unitsPanel);
+        view.appendChild(layout);
 
         this.target.appendChild(view);
+    }
+
+    private appendPeruRiskMap(container: HTMLElement, engine: AnalyticsEngine): void {
+        const title = document.createElement("h2");
+        title.className = "map-title";
+        title.textContent = "MAPA DE RIESGO POR REGION";
+        container.appendChild(title);
+
+        const map = document.createElement("div");
+        map.className = "peru-risk-map";
+
+        const tooltip = document.createElement("div");
+        tooltip.className = "region-tooltip";
+        tooltip.style.display = "none";
+        map.appendChild(tooltip);
+
+        const aggregates = this.getRegionAggregates(engine);
+        const aggregateMap = this.createRegionAggregateMap(aggregates);
+        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        svg.setAttribute("class", "map-svg");
+        svg.setAttribute("viewBox", "0 0 920 1220");
+        svg.setAttribute("role", "img");
+        svg.setAttribute("aria-label", "Mapa de riesgo por region del Peru");
+
+        peruRegionShapes.forEach((shape: MapRegionShape) => {
+            const aggregate = this.findRegionAggregate(shape.name, aggregateMap);
+            const selectedCount = aggregate ? this.getRiskValue(aggregate.riskBreakdown, this.selectedRiskView) : 0;
+            const ratio = aggregate?.totalColegios ? selectedCount / aggregate.totalColegios : Number.NaN;
+            const normalizedShape = this.normalizeRegionForMap(shape.name);
+            const selected = !!this.selectedRegion && this.normalizeRegionForMap(this.selectedRegion) === normalizedShape;
+
+            if (!aggregate && !this.warnedMissingRegionMatches.has(normalizedShape)) {
+                console.warn("Region sin match de agregados para mapa", shape.name);
+                this.warnedMissingRegionMatches.add(normalizedShape);
+            }
+
+            const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+            path.setAttribute("d", shape.path);
+            path.setAttribute("fill", getRiskRatioColor(ratio));
+            path.setAttribute("class", [
+                "map-region",
+                aggregate ? "" : "map-region-no-data",
+                selected ? "map-region-selected" : ""
+            ].filter(Boolean).join(" "));
+            path.setAttribute("data-region", shape.name);
+
+            path.onmouseenter = (event: MouseEvent) => this.showRegionTooltip(tooltip, map, shape.name, aggregate, selectedCount, ratio, event);
+            path.onmousemove = (event: MouseEvent) => this.positionRegionTooltip(tooltip, map, event);
+            path.onmouseleave = () => {
+                tooltip.style.display = "none";
+            };
+            path.onclick = () => {
+                this.selectedRegion = shape.name;
+                console.log("onRegionClick", shape.name, aggregate);
+                this.renderCurrentView();
+            };
+
+            svg.appendChild(path);
+
+            const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+            label.setAttribute("x", shape.labelX.toString());
+            label.setAttribute("y", shape.labelY.toString());
+            label.setAttribute("class", "map-region-label");
+            label.textContent = this.shortRegionLabel(shape.name);
+            svg.appendChild(label);
+        });
+
+        map.appendChild(svg);
+        this.appendMapNationalSummary(map, engine);
+        this.appendRiskToggle(map);
+        container.appendChild(map);
+    }
+
+    private appendMapNationalSummary(map: HTMLElement, engine: AnalyticsEngine): void {
+        const totals = engine.getTotals();
+        const summary = document.createElement("aside");
+        summary.className = "map-summary-card";
+
+        const title = document.createElement("h3");
+        title.textContent = "Resumen nacional";
+        summary.appendChild(title);
+
+        [
+            ["RG", "N° Regiones", this.formatInteger(totals.regionesUnicas)],
+            ["CL", "N° Colegios", this.formatInteger(totals.colegiosUnicos)]
+        ].forEach(([icon, label, value]: string[]) => {
+            const row = document.createElement("div");
+            row.className = "map-summary-row";
+
+            const badge = document.createElement("span");
+            badge.textContent = icon;
+            row.appendChild(badge);
+
+            const content = document.createElement("div");
+            const strong = document.createElement("strong");
+            strong.textContent = value;
+            content.appendChild(strong);
+
+            const small = document.createElement("small");
+            small.textContent = label;
+            content.appendChild(small);
+            row.appendChild(content);
+            summary.appendChild(row);
+        });
+
+        map.appendChild(summary);
+    }
+
+    private appendRiskToggle(map: HTMLElement): void {
+        const toggle = document.createElement("div");
+        toggle.className = "map-risk-toggle";
+
+        const label = document.createElement("span");
+        label.textContent = "Ver por Riesgo:";
+        toggle.appendChild(label);
+
+        riskLevels.forEach((risk: RiskLevel) => {
+            const button = document.createElement("button");
+            button.className = `map-risk-toggle-button${risk === this.selectedRiskView ? " map-risk-toggle-button-active" : ""}`;
+            button.type = "button";
+            button.textContent = risk;
+            button.onclick = () => {
+                this.selectedRiskView = risk;
+                this.renderCurrentView();
+            };
+            toggle.appendChild(button);
+        });
+
+        map.appendChild(toggle);
+    }
+
+    private showRegionTooltip(
+        tooltip: HTMLElement,
+        map: HTMLElement,
+        regionName: string,
+        aggregate: RegionAggregate | undefined,
+        selectedCount: number,
+        ratio: number,
+        event: MouseEvent
+    ): void {
+        tooltip.replaceChildren();
+
+        const title = document.createElement("strong");
+        title.textContent = aggregate?.region || regionName;
+        tooltip.appendChild(title);
+
+        const rows = aggregate
+            ? [
+                ["Riesgo seleccionado", this.selectedRiskView],
+                [`Colegios ${this.selectedRiskView}`, this.formatInteger(selectedCount)],
+                ["Total colegios", this.formatInteger(aggregate.totalColegios)],
+                [`% ${this.selectedRiskView}`, this.formatPercent(Number.isFinite(ratio) ? ratio * 100 : 0)],
+                ["Score", aggregate.weightedScore.toFixed(2)],
+                ["Clasificacion", aggregate.weightedRisk]
+            ]
+            : [["Sin datos", "No hay agregados para esta region"]];
+
+        rows.forEach(([label, value]: string[]) => {
+            const row = document.createElement("div");
+            const labelElement = document.createElement("span");
+            labelElement.textContent = label;
+            row.appendChild(labelElement);
+
+            const valueElement = document.createElement("b");
+            valueElement.textContent = value;
+            row.appendChild(valueElement);
+            tooltip.appendChild(row);
+        });
+
+        tooltip.style.display = "block";
+        this.positionRegionTooltip(tooltip, map, event);
+    }
+
+    private positionRegionTooltip(tooltip: HTMLElement, map: HTMLElement, event: MouseEvent): void {
+        const rect = map.getBoundingClientRect();
+        const tooltipWidth = tooltip.offsetWidth || 210;
+        const tooltipHeight = tooltip.offsetHeight || 150;
+        const left = Math.min(Math.max(event.clientX - rect.left + 14, 8), rect.width - tooltipWidth - 8);
+        const top = Math.min(Math.max(event.clientY - rect.top + 14, 8), rect.height - tooltipHeight - 8);
+        tooltip.style.left = `${left}px`;
+        tooltip.style.top = `${top}px`;
+    }
+
+    private getRegionAggregates(engine: AnalyticsEngine): RegionAggregate[] {
+        return engine.getRegions().map((summary: BucketSummary) => ({
+            region: summary.label,
+            totalColegios: summary.colegiosUnicos,
+            montoInversion: summary.montoTotal,
+            estudiantesBeneficiarios: summary.beneficiariosTotal,
+            numeroSolicitudes: summary.solicitudesUnicas,
+            risk: summary.clasificacion,
+            predominantRisk: this.getPredominantRisk(summary.riesgoColegios),
+            weightedRisk: summary.clasificacion,
+            weightedScore: summary.scoreRiesgo,
+            riskBreakdown: summary.riesgoColegios
+        }));
+    }
+
+    private createRegionAggregateMap(aggregates: RegionAggregate[]): Map<string, RegionAggregate> {
+        const map = new Map<string, RegionAggregate>();
+        aggregates.forEach((aggregate: RegionAggregate) => {
+            map.set(this.normalizeRegionForMap(aggregate.region), aggregate);
+        });
+        return map;
+    }
+
+    private findRegionAggregate(regionName: string, aggregateMap: Map<string, RegionAggregate>): RegionAggregate | undefined {
+        const normalized = this.normalizeRegionForMap(regionName);
+        const direct = aggregateMap.get(normalized);
+        if (direct) {
+            return direct;
+        }
+
+        const aliases = this.getRegionAliases(normalized);
+        for (const alias of aliases) {
+            const aggregate = aggregateMap.get(alias);
+            if (aggregate) {
+                return aggregate;
+            }
+        }
+
+        return undefined;
+    }
+
+    private getRegionAliases(normalizedRegion: string): string[] {
+        const aliases: Record<string, string[]> = {
+            "LIMA": ["LIMA METROPOLITANA", "LIMA PROVINCIAS"],
+            "LIMA METROPOLITANA": ["LIMA", "LIMA METROPOLITANA"],
+            "LIMA PROVINCIAS": ["LIMA", "LIMA PROVINCIAS"],
+            "CALLAO": ["PROVINCIA CONSTITUCIONAL DEL CALLAO", "CALLAO"]
+        };
+
+        return aliases[normalizedRegion] || [];
+    }
+
+    private normalizeRegionForMap(value: string): string {
+        return this.normalizeText(value)
+            .replace(/^REGION\s+/g, "")
+            .replace(/\s+REGION$/g, "")
+            .replace(/\s+/g, " ");
+    }
+
+    private getPredominantRisk(riskBreakdown: RiskBuckets): RiskLevel {
+        return riskLevels.reduce((best: RiskLevel, current: RiskLevel) => (
+            this.getRiskValue(riskBreakdown, current) > this.getRiskValue(riskBreakdown, best) ? current : best
+        ), "Bajo");
+    }
+
+    private getRiskValue(riskBreakdown: RiskBuckets, risk: RiskLevel): number {
+        if (risk === "Bajo") {
+            return riskBreakdown.bajo;
+        }
+
+        if (risk === "Medio") {
+            return riskBreakdown.medio;
+        }
+
+        if (risk === "Alto") {
+            return riskBreakdown.alto;
+        }
+
+        return riskBreakdown.muyAlto;
+    }
+
+    private shortRegionLabel(region: string): string {
+        return region
+            .replace("LIMA METROPOLITANA", "LIMA MET.")
+            .replace("LIMA PROVINCIAS", "LIMA PROV.");
     }
 
     private appendUgmeView(engine: AnalyticsEngine): void {
@@ -2634,6 +3026,7 @@ export class Visual implements IVisual {
             columnIndexes.nombreLocal,
             columnIndexes.idSolicitud,
             columnIndexes.estadoSolicitud,
+            columnIndexes.nivelRiesgo,
             columnIndexes.montoIntervencion,
             columnIndexes.beneficiarios,
             columnIndexes.montoAsignado,

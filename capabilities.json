@@ -41,6 +41,11 @@
             "kind": "Grouping"
         },
         {
+            "displayName": "Nivel Riesgo",
+            "name": "nivelRiesgo",
+            "kind": "Grouping"
+        },
+        {
             "displayName": "Grupo",
             "name": "grupo",
             "kind": "Grouping"
@@ -120,6 +125,11 @@
                         {
                             "bind": {
                                 "to": "estadoSolicitud"
+                            }
+                        },
+                        {
+                            "bind": {
+                                "to": "nivelRiesgo"
                             }
                         },
                         {
