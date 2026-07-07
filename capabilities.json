@@ -16,8 +16,33 @@
             "kind": "Grouping"
         },
         {
+            "displayName": "Distrito",
+            "name": "distrito",
+            "kind": "Grouping"
+        },
+        {
             "displayName": "Codigo Local",
             "name": "codigoLocal",
+            "kind": "Grouping"
+        },
+        {
+            "displayName": "Nombre Local",
+            "name": "nombreLocal",
+            "kind": "Grouping"
+        },
+        {
+            "displayName": "Id Solicitud",
+            "name": "idSolicitud",
+            "kind": "Grouping"
+        },
+        {
+            "displayName": "Estado Solicitud",
+            "name": "estadoSolicitud",
+            "kind": "Grouping"
+        },
+        {
+            "displayName": "Grupo",
+            "name": "grupo",
             "kind": "Grouping"
         },
         {
@@ -28,6 +53,26 @@
         {
             "displayName": "Beneficiarios",
             "name": "beneficiarios",
+            "kind": "Measure"
+        },
+        {
+            "displayName": "Monto Asignado",
+            "name": "montoAsignado",
+            "kind": "Measure"
+        },
+        {
+            "displayName": "Monto Transferencia",
+            "name": "montoTransferencia",
+            "kind": "Measure"
+        },
+        {
+            "displayName": "Monto Retirado",
+            "name": "montoRetirado",
+            "kind": "Measure"
+        },
+        {
+            "displayName": "Cantidad",
+            "name": "cantidad",
             "kind": "Measure"
         }
     ],
@@ -54,7 +99,32 @@
                         },
                         {
                             "bind": {
+                                "to": "distrito"
+                            }
+                        },
+                        {
+                            "bind": {
                                 "to": "codigoLocal"
+                            }
+                        },
+                        {
+                            "bind": {
+                                "to": "nombreLocal"
+                            }
+                        },
+                        {
+                            "bind": {
+                                "to": "idSolicitud"
+                            }
+                        },
+                        {
+                            "bind": {
+                                "to": "estadoSolicitud"
+                            }
+                        },
+                        {
+                            "bind": {
+                                "to": "grupo"
                             }
                         },
                         {
@@ -65,6 +135,26 @@
                         {
                             "bind": {
                                 "to": "beneficiarios"
+                            }
+                        },
+                        {
+                            "bind": {
+                                "to": "montoAsignado"
+                            }
+                        },
+                        {
+                            "bind": {
+                                "to": "montoTransferencia"
+                            }
+                        },
+                        {
+                            "bind": {
+                                "to": "montoRetirado"
+                            }
+                        },
+                        {
+                            "bind": {
+                                "to": "cantidad"
                             }
                         }
                     ],

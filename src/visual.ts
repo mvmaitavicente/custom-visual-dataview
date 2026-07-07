@@ -24,9 +24,15 @@ interface ColumnIndexes {
     region: number;
     provincia: number;
     codigoLocal: number;
+    nombreLocal: number;
     unidadGerencial: number;
     montoIntervencion: number;
     beneficiarios: number;
+    montoAsignado: number;
+    montoTransferencia: number;
+    montoRetirado: number;
+    grupo: number;
+    cantidad: number;
     distrito: number;
     idSolicitud: number;
     estadoSolicitud: number;
@@ -41,8 +47,14 @@ interface SourceRecord {
     region: string;
     provincia: string;
     codigoLocal: string;
+    nombreLocal: string;
     montoIntervencion: number;
     beneficiarios: number;
+    montoAsignado: number;
+    montoTransferencia: number;
+    montoRetirado: number;
+    grupo: string;
+    cantidad: number;
     distrito: string;
     idSolicitud: string;
     estadoSolicitud: string;
@@ -119,31 +131,132 @@ interface RiskLevelSummary extends BucketSummary {
     porcentajeSobreTotal: number;
 }
 
-type UnitKpiName = "UGRD" | "UGEO";
+type UnitKpiName = "UGRD" | "UGEO" | "UGSC" | "UGM" | "UGME";
+type VisualView = "summary" | "ugme";
 
-interface UnitKpiBucket {
-    unit: UnitKpiName;
-    label: string;
-    regiones: Set<string>;
-    colegios: Set<string>;
+interface GroupMetricBucket {
+    grupoKey: string;
+    grupoLabel: string;
     montoIntervencion: number;
     beneficiarios: number;
+    cantidad: number;
+    colegios: Set<string>;
+    regiones: Set<string>;
     filas: number;
+}
+
+interface GroupMetricSummary {
+    grupo: string;
+    montoIntervencion: number;
+    beneficiarios: number;
+    cantidad: number;
+    colegios: number;
+    regiones: number;
+    filas: number;
+}
+
+interface UnitKpiBucket {
+    unitKey: string;
+    label: string;
+    filas: number;
+    regiones: Set<string>;
+    colegios: Set<string>;
+    solicitudes: Set<string>;
+    beneficiarios: number;
+    montoIntervencion: number;
+    montoAsignado: number;
+    montoTransferencia: number;
+    montoRetirado: number;
+    solicitudesRevision: Set<string>;
+    solicitudesCulminadas: Set<string>;
+    colegiosConTransferencia: Set<string>;
+    colegiosConRetiro: Set<string>;
+    grupos: Map<string, GroupMetricBucket>;
 }
 
 interface UnitKpiSummary {
     unit: UnitKpiName;
+    unitKey: UnitKpiName;
+    unidad: string;
+    label: string;
+    filas: number;
+    solicitudes: number;
     regiones: number;
     colegios: number;
     montoIntervencion: number;
+    montoAsignado: number;
+    montoTransferencia: number;
+    montoRetirado: number;
     beneficiarios: number;
+    solicitudesRevision: number;
+    solicitudesCulminadas: number;
+    colegiosConTransferencia: number;
+    colegiosConRetiro: number;
+    grupos: GroupMetricSummary[];
     registros: number;
+}
+
+interface UgmeKpiSummary {
+    unitKey: "UGME";
+    regiones: number;
+    colegios: number;
+    montoIntervencion: number;
+    grupos: GroupMetricSummary[];
+}
+
+interface UnitTheme {
+    color: string;
+    background: string;
+    icon: string;
+    name: string;
+}
+
+interface UnitKpiCell {
+    icon: string;
+    label: string;
+    value: string;
+}
+
+interface UnitDetailRow {
+    unit: UnitKpiName;
+    codigoLocal: string;
+    nombreLocal: string;
+    region: string;
+    provincia: string;
+    distrito: string;
+    grupo?: string;
+    montoIntervencion: number;
+    beneficiarios: number;
+    cantidad: number;
+    solicitudes: Set<string>;
+    solicitudesRevision: Set<string>;
+    solicitudesCulminadas: Set<string>;
+    montoAsignado: number;
+    montoTransferencia: number;
+    montoRetirado: number;
+}
+
+interface DetailColumn {
+    label: string;
+    value: (row: UnitDetailRow) => string;
 }
 
 interface RegionTooltipSummary {
     colegios: number;
     provincias: number;
 }
+
+const ugmeGrupoOrder = [
+    "MOBILIARIO",
+    "EQUIPAMIENTO",
+    "LABORATORIOS",
+    "TALLERES",
+    "ESCUELA MODULAR",
+    "AULA MODULAR",
+    "KIT DE PARARRAYO",
+    "MODULO SS.HH.",
+    "REDES COMPLEMENTARIAS"
+];
 
 type SummaryLevel = "nacional" | "region" | "provincia" | "distrito" | "colegio";
 
@@ -236,32 +349,6 @@ function measure<T>(label: string, fn: () => T): { value: T; ms: number } {
     const end = performance.now();
     console.log(`${label} ms`, end - start);
     return { value, ms: end - start };
-}
-
-function countDistinct<T>(records: T[], selector: (r: T) => string): number {
-    const values = new Set<string>();
-
-    for (const record of records) {
-        const value = String(selector(record) ?? "").trim().toUpperCase();
-        if (value && value !== "-" && value !== "NULL" && value !== "UNDEFINED") {
-            values.add(value);
-        }
-    }
-
-    return values.size;
-}
-
-function buildUnitKpi(records: SourceRecord[], unit: UnitKpiName): UnitKpiSummary {
-    const unitRecords = records.filter((record: SourceRecord) => record.unidadGerencial === unit);
-
-    return {
-        unit,
-        regiones: countDistinct(unitRecords, (record: SourceRecord) => record.region),
-        colegios: countDistinct(unitRecords, (record: SourceRecord) => record.codigoLocal),
-        montoIntervencion: unitRecords.reduce((sum: number, record: SourceRecord) => sum + (Number(record.montoIntervencion) || 0), 0),
-        beneficiarios: unitRecords.reduce((sum: number, record: SourceRecord) => sum + (Number(record.beneficiarios) || 0), 0),
-        registros: unitRecords.length
-    };
 }
 
 class AnalyticsEngine {
@@ -364,8 +451,33 @@ class AnalyticsEngine {
     public getUnitKpis(): UnitKpiSummary[] {
         return [
             this.unitKpiBucketToSummary(this.result.byUnidadKpi.get("UGRD"), "UGRD"),
-            this.unitKpiBucketToSummary(this.result.byUnidadKpi.get("UGEO"), "UGEO")
+            this.unitKpiBucketToSummary(this.result.byUnidadKpi.get("UGEO"), "UGEO"),
+            this.unitKpiBucketToSummary(this.result.byUnidadKpi.get("UGSC"), "UGSC"),
+            this.unitKpiBucketToSummary(this.result.byUnidadKpi.get("UGM"), "UGM"),
+            this.unitKpiBucketToSummary(this.result.byUnidadKpi.get("UGME"), "UGME")
         ];
+    }
+
+    public getUnitKpi(unitKey: UnitKpiName): UnitKpiSummary {
+        const normalizedUnit = AnalyticsEngine.normalizeLookupKey(unitKey).toUpperCase() as UnitKpiName;
+        return this.unitKpiBucketToSummary(this.result.byUnidadKpi.get(normalizedUnit), normalizedUnit);
+    }
+
+    public getUnitSummary(unitKey: string): UnitKpiSummary {
+        return this.getUnitKpi(AnalyticsEngine.normalizeLookupKey(unitKey).toUpperCase() as UnitKpiName);
+    }
+
+    public getUgmeKpi(): UgmeKpiSummary {
+        const bucket = this.result.byUnidadKpi.get("UGME");
+        const summary = this.unitKpiBucketToSummary(bucket, "UGME");
+
+        return {
+            unitKey: "UGME",
+            regiones: summary.regiones,
+            colegios: summary.colegios,
+            montoIntervencion: summary.montoIntervencion,
+            grupos: summary.grupos
+        };
     }
 
     public getRegionTooltip(regionKey: string): RegionTooltipSummary {
@@ -482,6 +594,35 @@ class AnalyticsEngine {
             .toLowerCase();
     }
 
+    private static normalizeText(value: PrimitiveValue): string {
+        return AnalyticsEngine.displayValue(value)
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .trim()
+            .replace(/\s+/g, " ")
+            .toUpperCase();
+    }
+
+    private static isRevisionState(value: string): boolean {
+        return value === "EN REVISION" || value === "REVISION";
+    }
+
+    private static isCulminadoState(value: string): boolean {
+        return value === "CULMINADO" || value === "CULMINADA" || value === "CULMINADOS" || value === "CULMINADAS";
+    }
+
+    private static normalizeGrupo(value: PrimitiveValue): string {
+        const normalized = AnalyticsEngine.normalizeText(value)
+            .replace(/[.]/g, "")
+            .replace(/\s+/g, " ");
+
+        if (normalized === "MODULO SSHH" || normalized === "MODULO DE SSHH" || normalized === "MODULO SS HH" || normalized === "MODULO DE SS HH") {
+            return "MODULO SS.HH.";
+        }
+
+        return ugmeGrupoOrder.includes(normalized) ? normalized : "";
+    }
+
     private static createBucket(key: string, label: string): MetricBucket {
         return {
             key,
@@ -540,31 +681,92 @@ class AnalyticsEngine {
         map: Map<string, UnitKpiBucket>,
         record: SourceRecord
     ): void {
-        const unit = record.unidadGerencial.trim().toUpperCase() as UnitKpiName;
-        if (unit !== "UGRD" && unit !== "UGEO") {
+        const unitKey = AnalyticsEngine.normalizeText(record.unidadGerencial);
+        if (!unitKey) {
             return;
         }
 
-        const bucket = map.get(unit) || {
-            unit,
-            label: unit,
+        const bucket = map.get(unitKey) || {
+            unitKey,
+            label: unitKey,
+            filas: 0,
             regiones: new Set<string>(),
             colegios: new Set<string>(),
+            solicitudes: new Set<string>(),
+            beneficiarios: 0,
+            montoIntervencion: 0,
+            montoAsignado: 0,
+            montoTransferencia: 0,
+            montoRetirado: 0,
+            solicitudesRevision: new Set<string>(),
+            solicitudesCulminadas: new Set<string>(),
+            colegiosConTransferencia: new Set<string>(),
+            colegiosConRetiro: new Set<string>(),
+            grupos: new Map<string, GroupMetricBucket>()
+        };
+
+        AnalyticsEngine.addValidDistinct(bucket.solicitudes, record.idSolicitud);
+        AnalyticsEngine.addValidDistinct(bucket.regiones, record.region);
+        AnalyticsEngine.addValidDistinct(bucket.colegios, record.codigoLocal);
+        bucket.beneficiarios += Number(record.beneficiarios) || 0;
+        bucket.montoIntervencion += Number(record.montoIntervencion) || 0;
+        bucket.montoAsignado += Number(record.montoAsignado) || 0;
+        bucket.montoTransferencia += Number(record.montoTransferencia) || 0;
+        bucket.montoRetirado += Number(record.montoRetirado) || 0;
+
+        const estado = AnalyticsEngine.normalizeText(record.estadoSolicitud);
+        if (AnalyticsEngine.isRevisionState(estado)) {
+            AnalyticsEngine.addValidDistinct(bucket.solicitudesRevision, record.idSolicitud);
+        }
+
+        if (AnalyticsEngine.isCulminadoState(estado)) {
+            AnalyticsEngine.addValidDistinct(bucket.solicitudesCulminadas, record.idSolicitud);
+        }
+
+        if (record.montoTransferencia > 0) {
+            AnalyticsEngine.addValidDistinct(bucket.colegiosConTransferencia, record.codigoLocal);
+        }
+
+        if (record.montoRetirado > 0) {
+            AnalyticsEngine.addValidDistinct(bucket.colegiosConRetiro, record.codigoLocal);
+        }
+
+        if (unitKey === "UGME") {
+            AnalyticsEngine.updateUgmeGroupBucket(bucket, record);
+        }
+
+        bucket.filas += 1;
+        map.set(unitKey, bucket);
+    }
+
+    private static updateUgmeGroupBucket(bucket: UnitKpiBucket, record: SourceRecord): void {
+        const grupoKey = AnalyticsEngine.normalizeGrupo(record.grupo);
+        if (!grupoKey) {
+            return;
+        }
+
+        const groupBucket = bucket.grupos.get(grupoKey) || {
+            grupoKey,
+            grupoLabel: grupoKey,
             montoIntervencion: 0,
             beneficiarios: 0,
+            cantidad: 0,
+            colegios: new Set<string>(),
+            regiones: new Set<string>(),
             filas: 0
         };
 
-        AnalyticsEngine.addValidDistinct(bucket.regiones, record.region);
-        AnalyticsEngine.addValidDistinct(bucket.colegios, record.codigoLocal);
-        bucket.montoIntervencion += Number(record.montoIntervencion) || 0;
-        bucket.beneficiarios += Number(record.beneficiarios) || 0;
-        bucket.filas += 1;
-        map.set(unit, bucket);
+        groupBucket.filas += 1;
+        AnalyticsEngine.addValidDistinct(groupBucket.colegios, record.codigoLocal);
+        AnalyticsEngine.addValidDistinct(groupBucket.regiones, record.region);
+        groupBucket.montoIntervencion += Number(record.montoIntervencion) || 0;
+        groupBucket.beneficiarios += Number(record.beneficiarios) || 0;
+        groupBucket.cantidad += Number(record.cantidad) || 0;
+        bucket.grupos.set(grupoKey, groupBucket);
     }
 
     private static addValidDistinct(set: Set<string>, value: string): void {
-        const normalizedValue = value.trim().toUpperCase();
+        const normalizedValue = AnalyticsEngine.normalizeText(value);
         if (normalizedValue && normalizedValue !== "-" && normalizedValue !== "NULL" && normalizedValue !== "UNDEFINED") {
             set.add(normalizedValue);
         }
@@ -574,22 +776,87 @@ class AnalyticsEngine {
         if (!bucket) {
             return {
                 unit,
+                unitKey: unit,
+                unidad: unit,
+                label: unit,
+                filas: 0,
+                solicitudes: 0,
                 regiones: 0,
                 colegios: 0,
                 montoIntervencion: 0,
+                montoAsignado: 0,
+                montoTransferencia: 0,
+                montoRetirado: 0,
                 beneficiarios: 0,
+                solicitudesRevision: 0,
+                solicitudesCulminadas: 0,
+                colegiosConTransferencia: 0,
+                colegiosConRetiro: 0,
+                grupos: AnalyticsEngine.emptyGroupSummaries(),
                 registros: 0
             };
         }
 
         return {
             unit,
+            unitKey: unit,
+            unidad: bucket.label,
+            label: bucket.label,
+            filas: bucket.filas,
+            solicitudes: bucket.solicitudes.size,
             regiones: bucket.regiones.size,
             colegios: bucket.colegios.size,
             montoIntervencion: bucket.montoIntervencion,
+            montoAsignado: bucket.montoAsignado,
+            montoTransferencia: bucket.montoTransferencia,
+            montoRetirado: bucket.montoRetirado,
             beneficiarios: bucket.beneficiarios,
+            solicitudesRevision: bucket.solicitudesRevision.size,
+            solicitudesCulminadas: bucket.solicitudesCulminadas.size,
+            colegiosConTransferencia: bucket.colegiosConTransferencia.size,
+            colegiosConRetiro: bucket.colegiosConRetiro.size,
+            grupos: AnalyticsEngine.groupBucketsToSummaries(bucket.grupos),
             registros: bucket.filas
         };
+    }
+
+    private static emptyGroupSummaries(): GroupMetricSummary[] {
+        return ugmeGrupoOrder.map((grupo: string) => ({
+            grupo,
+            montoIntervencion: 0,
+            beneficiarios: 0,
+            cantidad: 0,
+            colegios: 0,
+            regiones: 0,
+            filas: 0
+        }));
+    }
+
+    private static groupBucketsToSummaries(groups: Map<string, GroupMetricBucket>): GroupMetricSummary[] {
+        return ugmeGrupoOrder.map((grupo: string) => {
+            const bucket = groups.get(grupo);
+            if (!bucket) {
+                return {
+                    grupo,
+                    montoIntervencion: 0,
+                    beneficiarios: 0,
+                    cantidad: 0,
+                    colegios: 0,
+                    regiones: 0,
+                    filas: 0
+                };
+            }
+
+            return {
+                grupo: bucket.grupoLabel,
+                montoIntervencion: bucket.montoIntervencion,
+                beneficiarios: bucket.beneficiarios,
+                cantidad: bucket.cantidad,
+                colegios: bucket.colegios.size,
+                regiones: bucket.regiones.size,
+                filas: bucket.filas
+            };
+        });
     }
 
     private static addRelation(map: Map<string, Set<string>>, parentKey: string, childKey: string): void {
@@ -834,14 +1101,32 @@ export class Visual implements IVisual {
     private lastIncomingDataSignature = "";
     private segmentLoadStartTime?: number;
     private updateCount = 0;
+    private currentView: VisualView = "summary";
+    private latestDiagnostics: TableDiagnostics | null = null;
+    private detailModalUnit: UnitKpiName | null = null;
+    private isDetailModalOpen = false;
+    private detailSearchText = "";
+    private detailPage = 1;
+    private detailPageSize = 20;
+    private detailCacheByUnit: Map<string, UnitDetailRow[]> = new Map<string, UnitDetailRow[]>();
     private formattingSettings: VisualFormattingSettingsModel = new VisualFormattingSettingsModel();
     private formattingSettingsService: FormattingSettingsService;
+    private handleKeydown = (event: KeyboardEvent): void => {
+        if (event.key === "Escape" && this.isDetailModalOpen) {
+            this.closeDetailModal();
+        }
+    };
 
     constructor(options: VisualConstructorOptions) {
         this.host = options.host;
         this.target = options.element;
         this.formattingSettingsService = new FormattingSettingsService();
         this.target.classList.add("data-view-diagnostic");
+        window.addEventListener("keydown", this.handleKeydown);
+    }
+
+    public destroy(): void {
+        window.removeEventListener("keydown", this.handleKeydown);
     }
 
     public update(options: VisualUpdateOptions): void {
@@ -863,6 +1148,7 @@ export class Visual implements IVisual {
         }
 
         const diagnostics = this.buildDiagnostics(dataViews, fetchWaitMs);
+        this.latestDiagnostics = diagnostics;
 
         const renderStart = performance.now();
         this.render(diagnostics);
@@ -877,8 +1163,15 @@ export class Visual implements IVisual {
             diagnostics.performanceMetrics.updateTotalMs
         );
         this.updatePerformancePanel(diagnostics);
+        this.updatePerformanceMini(diagnostics);
         this.logDiagnostics(diagnostics);
         console.table(diagnostics.performanceMetrics);
+    }
+
+    private renderCurrentView(): void {
+        if (this.latestDiagnostics) {
+            this.render(this.latestDiagnostics);
+        }
     }
 
     public getFormattingModel(): powerbi.visuals.FormattingModel {
@@ -1026,6 +1319,11 @@ export class Visual implements IVisual {
         performanceMetrics.analyticsRebuilt = analyticsRebuilt;
         performanceMetrics.rowsPerSecond = this.calculateProcessingRate(this.accumulatedRows.length, performanceMetrics.buildAnalyticsEngineMs || performanceMetrics.updateTotalMs);
         performanceMetrics.msPer10kRows = this.calculateMsPer10k(this.accumulatedRows.length, performanceMetrics.buildAnalyticsEngineMs || performanceMetrics.updateTotalMs);
+        console.table([
+            analytics.getUnitKpi("UGSC"),
+            analytics.getUnitKpi("UGM")
+        ]);
+        console.table(analytics.getUgmeKpi().grupos);
 
         return {
             dataViewCount: dataViews.length,
@@ -1053,9 +1351,15 @@ export class Visual implements IVisual {
             region: this.findColumnIndexByRole(columns, "region"),
             provincia: this.findColumnIndexByRole(columns, "provincia"),
             codigoLocal: this.findColumnIndexByRole(columns, "codigoLocal"),
+            nombreLocal: this.findColumnIndexByRole(columns, "nombreLocal"),
             unidadGerencial: this.findColumnIndexByRole(columns, "unidadGerencial"),
             montoIntervencion: this.findColumnIndexByRole(columns, "montoIntervencion"),
             beneficiarios: this.findColumnIndexByRole(columns, "beneficiarios"),
+            montoAsignado: this.findColumnIndexByRole(columns, "montoAsignado"),
+            montoTransferencia: this.findColumnIndexByRole(columns, "montoTransferencia"),
+            montoRetirado: this.findColumnIndexByRole(columns, "montoRetirado"),
+            grupo: this.findColumnIndexByRole(columns, "grupo"),
+            cantidad: this.findColumnIndexByRole(columns, "cantidad"),
             distrito: this.findColumnIndexByRole(columns, "distrito"),
             idSolicitud: this.findColumnIndexByRole(columns, "idSolicitud"),
             estadoSolicitud: this.findColumnIndexByRole(columns, "estadoSolicitud"),
@@ -1080,10 +1384,16 @@ export class Visual implements IVisual {
             region: this.readString(row, columnIndexes.region),
             provincia: this.readString(row, columnIndexes.provincia),
             codigoLocal: this.readString(row, columnIndexes.codigoLocal),
+            nombreLocal: this.readString(row, columnIndexes.nombreLocal, "-"),
             montoIntervencion: this.toNumber(row[columnIndexes.montoIntervencion]),
             beneficiarios: this.toNumber(row[columnIndexes.beneficiarios]),
+            montoAsignado: this.toNumber(row[columnIndexes.montoAsignado]),
+            montoTransferencia: this.toNumber(row[columnIndexes.montoTransferencia]),
+            montoRetirado: this.toNumber(row[columnIndexes.montoRetirado]),
+            grupo: this.readString(row, columnIndexes.grupo),
+            cantidad: this.toNumber(row[columnIndexes.cantidad]),
             distrito: this.readString(row, columnIndexes.distrito),
-            idSolicitud: this.readString(row, columnIndexes.idSolicitud, this.readString(row, columnIndexes.codigoLocal)),
+            idSolicitud: this.readString(row, columnIndexes.idSolicitud),
             estadoSolicitud: this.readString(row, columnIndexes.estadoSolicitud),
             nivelRiesgo: this.readString(row, columnIndexes.nivelRiesgo),
             montoInversion: this.toNumber(row[columnIndexes.montoInversion]) || this.toNumber(row[columnIndexes.montoIntervencion]),
@@ -1121,33 +1431,634 @@ export class Visual implements IVisual {
 
         if (!diagnostics.hasTable) {
             this.appendMessage("No table DataView received.");
+            this.appendPerformanceMini(diagnostics);
             return;
         }
 
         if (this.hasMissingRole(diagnostics.columnIndexes)) {
-            this.appendMessage("Missing one or more required roles for UGRD/UGEO KPI cards.");
-            this.appendColumnsTable(diagnostics.columns);
+            this.appendMessage("Missing one or more required roles for unit KPI cards.");
+            this.appendPerformanceMini(diagnostics);
             return;
         }
 
         if (diagnostics.isLoading) {
-            this.appendLoadingPanel(diagnostics);
+            this.appendFinalLoadingPanel(diagnostics);
+            this.appendPerformanceMini(diagnostics);
             return;
         }
 
-        const title = document.createElement("h2");
-        title.textContent = "DataView diagnostics";
-        this.target.appendChild(title);
-
-        this.appendDataViewPanel(diagnostics);
-        this.appendPerformancePanel(diagnostics);
         if (!diagnostics.analytics) {
             this.appendMessage("Analytics Engine is not available.");
+            this.appendPerformanceMini(diagnostics);
             return;
         }
 
-        this.appendUnitKpiCards(diagnostics.analytics);
-        this.appendColumnsTable(diagnostics.columns);
+        if (this.currentView === "ugme") {
+            this.appendUgmeView(diagnostics.analytics);
+        } else {
+            this.appendSummaryView(diagnostics.analytics);
+        }
+
+        if (this.isDetailModalOpen && this.detailModalUnit) {
+            this.appendDetailModal(this.detailModalUnit);
+        }
+
+        this.appendPerformanceMini(diagnostics);
+    }
+
+    private appendSummaryView(engine: AnalyticsEngine): void {
+        const view = document.createElement("section");
+        view.className = "unit-summary-view";
+
+        const title = document.createElement("h1");
+        title.textContent = "RESUMEN POR UNIDADES GERENCIALES";
+        view.appendChild(title);
+
+        const grid = document.createElement("div");
+        grid.className = "unit-grid";
+
+        (["UGRD", "UGSC", "UGEO", "UGM"] as UnitKpiName[]).forEach((unit: UnitKpiName) => {
+            grid.appendChild(this.createUnitCard(engine.getUnitKpi(unit), false));
+        });
+
+        view.appendChild(grid);
+
+        const nextButton = document.createElement("button");
+        nextButton.className = "floating-next-button";
+        nextButton.type = "button";
+        nextButton.textContent = "Ver UGME";
+        nextButton.onclick = () => {
+            this.currentView = "ugme";
+            this.renderCurrentView();
+        };
+        view.appendChild(nextButton);
+
+        this.target.appendChild(view);
+    }
+
+    private appendUgmeView(engine: AnalyticsEngine): void {
+        const view = document.createElement("section");
+        view.className = "ugme-view";
+
+        const backButton = document.createElement("button");
+        backButton.className = "ugme-back-button";
+        backButton.type = "button";
+        backButton.textContent = "< Volver";
+        backButton.onclick = () => {
+            this.currentView = "summary";
+            this.renderCurrentView();
+        };
+        view.appendChild(backButton);
+
+        const kpi = engine.getUnitKpi("UGME");
+        const card = this.createUnitCard(kpi, true);
+        card.classList.add("ugme-card");
+        view.appendChild(card);
+
+        this.target.appendChild(view);
+    }
+
+    private createUnitCard(kpi: UnitKpiSummary, showUgmeDetail: boolean): HTMLElement {
+        const theme = this.getUnitTheme(kpi.unit);
+        const card = document.createElement("section");
+        card.className = `unit-card unit-card-${kpi.unit.toLowerCase()}`;
+        card.style.setProperty("--unit-color", theme.color);
+        card.style.setProperty("--unit-bg", theme.background);
+
+        const header = document.createElement("div");
+        header.className = "unit-card-header";
+
+        const icon = document.createElement("div");
+        icon.className = "unit-card-icon";
+        icon.textContent = theme.icon;
+        header.appendChild(icon);
+
+        const titleGroup = document.createElement("div");
+        titleGroup.className = "unit-card-title-group";
+
+        const title = document.createElement("h2");
+        title.className = "unit-card-title";
+        title.textContent = kpi.unit;
+        titleGroup.appendChild(title);
+
+        const subtitle = document.createElement("p");
+        subtitle.className = "unit-card-subtitle";
+        subtitle.textContent = theme.name;
+        titleGroup.appendChild(subtitle);
+        header.appendChild(titleGroup);
+
+        const detailLink = document.createElement("button");
+        detailLink.className = "unit-card-detail-link";
+        detailLink.type = "button";
+        detailLink.textContent = "Ver detalle";
+        detailLink.onclick = () => this.openDetailModal(kpi.unit);
+        header.appendChild(detailLink);
+
+        card.appendChild(header);
+
+        const grid = document.createElement("div");
+        grid.className = "unit-kpi-grid";
+        this.getUnitKpiCells(kpi).forEach((item: UnitKpiCell) => grid.appendChild(this.createKpiCell(item)));
+        card.appendChild(grid);
+
+        if (showUgmeDetail) {
+            this.appendUgmeGroupCards(card, kpi.grupos);
+        }
+
+        return card;
+    }
+
+    private getUnitTheme(unit: UnitKpiName): UnitTheme {
+        const themes: Record<UnitKpiName, UnitTheme> = {
+            UGRD: {
+                color: "#f97316",
+                background: "#fff7ed",
+                icon: "R",
+                name: "Unidad Gerencial de Reconstruccion y Descentralizacion"
+            },
+            UGSC: {
+                color: "#7c3aed",
+                background: "#f5f3ff",
+                icon: "S",
+                name: "Unidad Gerencial de Supervision y Convenios"
+            },
+            UGEO: {
+                color: "#2563eb",
+                background: "#eff6ff",
+                icon: "E",
+                name: "Unidad Gerencial de Estudios y Obras"
+            },
+            UGM: {
+                color: "#16a34a",
+                background: "#f0fdf4",
+                icon: "M",
+                name: "Unidad Gerencial de Mantenimiento"
+            },
+            UGME: {
+                color: "#0891b2",
+                background: "#ecfeff",
+                icon: "ME",
+                name: "Unidad Gerencial de Mobiliario y Equipamiento"
+            }
+        };
+
+        return themes[unit];
+    }
+
+    private getUnitKpiCells(kpi: UnitKpiSummary): UnitKpiCell[] {
+        if (kpi.unit === "UGSC") {
+            return [
+                { icon: "RG", label: "N° Regiones", value: this.formatInteger(kpi.regiones) },
+                { icon: "CL", label: "N° Colegios", value: this.formatInteger(kpi.colegios) },
+                { icon: "SO", label: "N° Solicitudes", value: this.formatInteger(kpi.solicitudes) },
+                { icon: "EB", label: "Estudiantes Beneficiarios", value: this.formatInteger(kpi.beneficiarios) },
+                { icon: "ER", label: "Solicitudes en revision", value: this.formatInteger(kpi.solicitudesRevision) },
+                { icon: "CU", label: "Solicitudes culminadas", value: this.formatInteger(kpi.solicitudesCulminadas) },
+                { icon: "MI", label: "Monto de Inversion", value: this.formatNumber(kpi.montoIntervencion) }
+            ];
+        }
+
+        if (kpi.unit === "UGM") {
+            const porcentajeTransferencias = kpi.montoAsignado
+                ? (kpi.montoTransferencia / kpi.montoAsignado) * 100
+                : 0;
+
+            return [
+                { icon: "RG", label: "N° Regiones", value: this.formatInteger(kpi.regiones) },
+                { icon: "CL", label: "N° Colegios", value: this.formatInteger(kpi.colegios) },
+                { icon: "MP", label: "Monto Programado", value: this.formatNumber(kpi.montoAsignado) },
+                { icon: "MT", label: "Monto Transferido", value: this.formatNumber(kpi.montoTransferencia) },
+                { icon: "%", label: "% Transferencias", value: this.formatPercent(porcentajeTransferencias) },
+                { icon: "MR", label: "Monto Retirado", value: this.formatNumber(kpi.montoRetirado) },
+                { icon: "CT", label: "N° Colegios con Transferencia", value: this.formatInteger(kpi.colegiosConTransferencia) },
+                { icon: "CR", label: "N° Colegios con Retiro", value: this.formatInteger(kpi.colegiosConRetiro) }
+            ];
+        }
+
+        if (kpi.unit === "UGME") {
+            return [
+                { icon: "RG", label: "N° Regiones", value: this.formatInteger(kpi.regiones) },
+                { icon: "CL", label: "N° Colegios", value: this.formatInteger(kpi.colegios) },
+                { icon: "MI", label: "Monto de Inversion", value: this.formatNumber(kpi.montoIntervencion) }
+            ];
+        }
+
+        return [
+            { icon: "RG", label: "N° Regiones", value: this.formatInteger(kpi.regiones) },
+            { icon: "CL", label: "N° Colegios", value: this.formatInteger(kpi.colegios) },
+            { icon: "MI", label: "Monto de inversion", value: this.formatNumber(kpi.montoIntervencion) },
+            { icon: "EB", label: "Estudiantes beneficiarios", value: this.formatInteger(kpi.beneficiarios) }
+        ];
+    }
+
+    private createKpiCell(item: UnitKpiCell): HTMLElement {
+        const cell = document.createElement("div");
+        cell.className = "unit-kpi-cell";
+
+        const icon = document.createElement("span");
+        icon.className = "unit-kpi-icon";
+        icon.textContent = item.icon;
+        cell.appendChild(icon);
+
+        const content = document.createElement("div");
+
+        const value = document.createElement("div");
+        value.className = "unit-kpi-value";
+        value.textContent = item.value;
+        content.appendChild(value);
+
+        const label = document.createElement("div");
+        label.className = "unit-kpi-label";
+        label.textContent = item.label;
+        content.appendChild(label);
+
+        cell.appendChild(content);
+        return cell;
+    }
+
+    private appendUgmeGroupCards(card: HTMLElement, grupos: GroupMetricSummary[]): void {
+        const title = document.createElement("h3");
+        title.className = "ugme-section-title";
+        title.textContent = "Detalle por grupo";
+        card.appendChild(title);
+
+        const grid = document.createElement("div");
+        grid.className = "ugme-group-grid";
+
+        grupos.forEach((grupo: GroupMetricSummary) => {
+            const groupCard = document.createElement("section");
+            groupCard.className = "ugme-group-card";
+
+            const groupTitle = document.createElement("h4");
+            groupTitle.textContent = grupo.grupo;
+            groupCard.appendChild(groupTitle);
+
+            const rows = [
+                ["Cantidad", this.formatInteger(grupo.cantidad)],
+                ["Beneficiarios", this.formatInteger(grupo.beneficiarios)],
+                ["Monto de Inversion", this.formatNumber(grupo.montoIntervencion)]
+            ];
+
+            rows.forEach(([labelText, valueText]: string[]) => {
+                const row = document.createElement("div");
+                row.className = "ugme-group-row";
+
+                const label = document.createElement("span");
+                label.textContent = labelText;
+                row.appendChild(label);
+
+                const value = document.createElement("strong");
+                value.textContent = valueText;
+                row.appendChild(value);
+
+                groupCard.appendChild(row);
+            });
+
+            grid.appendChild(groupCard);
+        });
+
+        card.appendChild(grid);
+    }
+
+    private openDetailModal(unit: UnitKpiName): void {
+        this.detailModalUnit = unit;
+        this.isDetailModalOpen = true;
+        this.detailSearchText = "";
+        this.detailPage = 1;
+        this.renderCurrentView();
+    }
+
+    private closeDetailModal(): void {
+        this.isDetailModalOpen = false;
+        this.detailModalUnit = null;
+        this.detailSearchText = "";
+        this.detailPage = 1;
+        this.renderCurrentView();
+    }
+
+    private appendDetailModal(unit: UnitKpiName): void {
+        const backdrop = document.createElement("div");
+        backdrop.className = "detail-modal-backdrop";
+        backdrop.onclick = (event: MouseEvent) => {
+            if (event.target === backdrop) {
+                this.closeDetailModal();
+            }
+        };
+
+        const modal = document.createElement("section");
+        modal.className = "detail-modal";
+
+        const header = document.createElement("header");
+        header.className = "detail-modal-header";
+
+        const titleGroup = document.createElement("div");
+        const title = document.createElement("h2");
+        title.textContent = `Detalle de colegios - ${unit}`;
+        titleGroup.appendChild(title);
+
+        const subtitle = document.createElement("p");
+        subtitle.textContent = "Registros considerados para la unidad seleccionada";
+        titleGroup.appendChild(subtitle);
+        header.appendChild(titleGroup);
+
+        const closeIcon = document.createElement("button");
+        closeIcon.className = "detail-modal-close";
+        closeIcon.type = "button";
+        closeIcon.textContent = "X";
+        closeIcon.onclick = () => this.closeDetailModal();
+        header.appendChild(closeIcon);
+        modal.appendChild(header);
+
+        const allRows = this.getUnitSchoolDetails(unit);
+        const filteredRows = this.filterDetailRows(allRows);
+        const totalPages = Math.max(1, Math.ceil(filteredRows.length / this.detailPageSize));
+        this.detailPage = Math.min(this.detailPage, totalPages);
+        const pageStart = (this.detailPage - 1) * this.detailPageSize;
+        const pageRows = filteredRows.slice(pageStart, pageStart + this.detailPageSize);
+
+        const toolbar = document.createElement("div");
+        toolbar.className = "detail-modal-toolbar";
+
+        const search = document.createElement("input");
+        search.className = "detail-search-input";
+        search.type = "search";
+        search.placeholder = "Buscar colegio, region, provincia, distrito o grupo";
+        search.value = this.detailSearchText;
+        search.oninput = () => {
+            this.detailSearchText = search.value;
+            this.detailPage = 1;
+            this.renderCurrentView();
+        };
+        toolbar.appendChild(search);
+
+        const count = document.createElement("span");
+        count.className = "detail-count";
+        count.textContent = `Mostrando ${pageRows.length} de ${filteredRows.length} colegios`;
+        toolbar.appendChild(count);
+        modal.appendChild(toolbar);
+
+        this.appendDetailTable(modal, unit, pageRows);
+        this.appendDetailPagination(modal, totalPages);
+
+        const footer = document.createElement("footer");
+        footer.className = "detail-modal-footer";
+
+        const closeButton = document.createElement("button");
+        closeButton.type = "button";
+        closeButton.textContent = "Cerrar";
+        closeButton.onclick = () => this.closeDetailModal();
+        footer.appendChild(closeButton);
+        modal.appendChild(footer);
+
+        backdrop.appendChild(modal);
+        this.target.appendChild(backdrop);
+    }
+
+    private appendDetailTable(modal: HTMLElement, unit: UnitKpiName, rows: UnitDetailRow[]): void {
+        const scroller = document.createElement("div");
+        scroller.className = "detail-table-scroller";
+
+        const table = document.createElement("table");
+        table.className = "detail-table";
+        const thead = document.createElement("thead");
+        const headerRow = document.createElement("tr");
+        const columns = this.getDetailColumns(unit);
+
+        columns.forEach((column: DetailColumn) => {
+            const th = document.createElement("th");
+            th.textContent = column.label;
+            headerRow.appendChild(th);
+        });
+
+        thead.appendChild(headerRow);
+        table.appendChild(thead);
+
+        const tbody = document.createElement("tbody");
+        if (!rows.length) {
+            const row = document.createElement("tr");
+            const cell = document.createElement("td");
+            cell.colSpan = columns.length;
+            cell.textContent = "Sin colegios para mostrar.";
+            row.appendChild(cell);
+            tbody.appendChild(row);
+        } else {
+            rows.forEach((detailRow: UnitDetailRow) => {
+                const row = document.createElement("tr");
+                columns.forEach((column: DetailColumn) => {
+                    const td = document.createElement("td");
+                    td.textContent = column.value(detailRow);
+                    row.appendChild(td);
+                });
+                tbody.appendChild(row);
+            });
+        }
+
+        table.appendChild(tbody);
+        scroller.appendChild(table);
+        modal.appendChild(scroller);
+    }
+
+    private appendDetailPagination(modal: HTMLElement, totalPages: number): void {
+        const pagination = document.createElement("div");
+        pagination.className = "detail-pagination";
+
+        const previous = document.createElement("button");
+        previous.type = "button";
+        previous.textContent = "Anterior";
+        previous.disabled = this.detailPage <= 1;
+        previous.onclick = () => {
+            this.detailPage = Math.max(1, this.detailPage - 1);
+            this.renderCurrentView();
+        };
+        pagination.appendChild(previous);
+
+        const page = document.createElement("span");
+        page.textContent = `Pagina ${this.detailPage} de ${totalPages}`;
+        pagination.appendChild(page);
+
+        const next = document.createElement("button");
+        next.type = "button";
+        next.textContent = "Siguiente";
+        next.disabled = this.detailPage >= totalPages;
+        next.onclick = () => {
+            this.detailPage = Math.min(totalPages, this.detailPage + 1);
+            this.renderCurrentView();
+        };
+        pagination.appendChild(next);
+
+        modal.appendChild(pagination);
+    }
+
+    private getUnitSchoolDetails(unit: UnitKpiName): UnitDetailRow[] {
+        const cachedRows = this.detailCacheByUnit.get(unit);
+        if (cachedRows) {
+            return cachedRows;
+        }
+
+        const detailMap = new Map<string, UnitDetailRow>();
+
+        this.accumulatedRows.forEach((record: SourceRecord) => {
+            const recordUnit = this.normalizeText(record.unidadGerencial) as UnitKpiName;
+            if (recordUnit !== unit) {
+                return;
+            }
+
+            const codigoKey = this.normalizeText(record.codigoLocal);
+            const grupoKey = unit === "UGME" ? this.normalizeText(record.grupo) : "";
+            const key = unit === "UGME" ? `${codigoKey}|${grupoKey}` : codigoKey;
+            const row = detailMap.get(key) || {
+                unit,
+                codigoLocal: record.codigoLocal || "-",
+                nombreLocal: record.nombreLocal || "-",
+                region: record.region || "-",
+                provincia: record.provincia || "-",
+                distrito: record.distrito || "-",
+                grupo: unit === "UGME" ? record.grupo || "-" : undefined,
+                montoIntervencion: 0,
+                beneficiarios: 0,
+                cantidad: 0,
+                solicitudes: new Set<string>(),
+                solicitudesRevision: new Set<string>(),
+                solicitudesCulminadas: new Set<string>(),
+                montoAsignado: 0,
+                montoTransferencia: 0,
+                montoRetirado: 0
+            };
+
+            row.montoIntervencion += Number(record.montoIntervencion) || 0;
+            row.beneficiarios += Number(record.beneficiarios) || 0;
+            row.cantidad += Number(record.cantidad) || 0;
+            row.montoAsignado += Number(record.montoAsignado) || 0;
+            row.montoTransferencia += Number(record.montoTransferencia) || 0;
+            row.montoRetirado += Number(record.montoRetirado) || 0;
+
+            this.addValidDetailDistinct(row.solicitudes, record.idSolicitud);
+            const estado = this.normalizeText(record.estadoSolicitud);
+            if (estado === "EN REVISION" || estado === "REVISION") {
+                this.addValidDetailDistinct(row.solicitudesRevision, record.idSolicitud);
+            }
+
+            if (estado === "CULMINADO" || estado === "CULMINADA" || estado === "CULMINADOS" || estado === "CULMINADAS") {
+                this.addValidDetailDistinct(row.solicitudesCulminadas, record.idSolicitud);
+            }
+
+            detailMap.set(key, row);
+        });
+
+        const rows = Array.from(detailMap.values())
+            .sort((left: UnitDetailRow, right: UnitDetailRow) => {
+                const byRegion = left.region.localeCompare(right.region);
+                if (byRegion) {
+                    return byRegion;
+                }
+
+                return left.codigoLocal.localeCompare(right.codigoLocal);
+            });
+
+        this.detailCacheByUnit.set(unit, rows);
+        return rows;
+    }
+
+    private filterDetailRows(rows: UnitDetailRow[]): UnitDetailRow[] {
+        const searchText = this.normalizeText(this.detailSearchText);
+        if (!searchText) {
+            return rows;
+        }
+
+        return rows.filter((row: UnitDetailRow) => [
+            row.codigoLocal,
+            row.nombreLocal,
+            row.region,
+            row.provincia,
+            row.distrito,
+            row.grupo || ""
+        ].some((value: string) => this.normalizeText(value).includes(searchText)));
+    }
+
+    private getDetailColumns(unit: UnitKpiName): DetailColumn[] {
+        const baseColumns: DetailColumn[] = [
+            { label: "CodigoLocal", value: (row: UnitDetailRow) => row.codigoLocal },
+            { label: "NombreLocal", value: (row: UnitDetailRow) => row.nombreLocal || "-" },
+            { label: "Region", value: (row: UnitDetailRow) => row.region },
+            { label: "Provincia", value: (row: UnitDetailRow) => row.provincia },
+            { label: "Distrito", value: (row: UnitDetailRow) => row.distrito }
+        ];
+
+        if (unit === "UGSC") {
+            return [
+                ...baseColumns,
+                { label: "N° Solicitudes", value: (row: UnitDetailRow) => this.formatInteger(row.solicitudes.size) },
+                { label: "Estudiantes beneficiarios", value: (row: UnitDetailRow) => this.formatInteger(row.beneficiarios) },
+                { label: "Solicitudes en revision", value: (row: UnitDetailRow) => this.formatInteger(row.solicitudesRevision.size) },
+                { label: "Solicitudes culminadas", value: (row: UnitDetailRow) => this.formatInteger(row.solicitudesCulminadas.size) },
+                { label: "Monto de inversion", value: (row: UnitDetailRow) => this.formatCurrencyNoDecimals(row.montoIntervencion) }
+            ];
+        }
+
+        if (unit === "UGM") {
+            return [
+                ...baseColumns,
+                { label: "Monto Programado", value: (row: UnitDetailRow) => this.formatCurrencyNoDecimals(row.montoAsignado) },
+                { label: "Monto Transferido", value: (row: UnitDetailRow) => this.formatCurrencyNoDecimals(row.montoTransferencia) },
+                { label: "% Transferencias", value: (row: UnitDetailRow) => this.formatPercent(row.montoAsignado ? (row.montoTransferencia / row.montoAsignado) * 100 : 0) },
+                { label: "Monto Retirado", value: (row: UnitDetailRow) => this.formatCurrencyNoDecimals(row.montoRetirado) },
+                { label: "Tiene Transferencia", value: (row: UnitDetailRow) => row.montoTransferencia > 0 ? "Sí" : "No" },
+                { label: "Tiene Retiro", value: (row: UnitDetailRow) => row.montoRetirado > 0 ? "Sí" : "No" }
+            ];
+        }
+
+        if (unit === "UGME") {
+            return [
+                ...baseColumns,
+                { label: "Grupo", value: (row: UnitDetailRow) => row.grupo || "-" },
+                { label: "Cantidad", value: (row: UnitDetailRow) => this.formatInteger(row.cantidad) },
+                { label: "Beneficiarios", value: (row: UnitDetailRow) => this.formatInteger(row.beneficiarios) },
+                { label: "Monto de inversion", value: (row: UnitDetailRow) => this.formatCurrencyNoDecimals(row.montoIntervencion) }
+            ];
+        }
+
+        return [
+            ...baseColumns,
+            { label: "Monto de inversion", value: (row: UnitDetailRow) => this.formatCurrencyNoDecimals(row.montoIntervencion) },
+            { label: "Estudiantes beneficiarios", value: (row: UnitDetailRow) => this.formatInteger(row.beneficiarios) }
+        ];
+    }
+
+    private addValidDetailDistinct(set: Set<string>, value: string): void {
+        const normalizedValue = this.normalizeText(value);
+        if (normalizedValue && normalizedValue !== "-" && normalizedValue !== "NULL" && normalizedValue !== "UNDEFINED") {
+            set.add(normalizedValue);
+        }
+    }
+
+    private appendPerformanceMini(diagnostics: TableDiagnostics): void {
+        const performance = document.createElement("div");
+        performance.className = "performance-mini";
+        performance.textContent = `Tiempo total: ${this.formatMs(diagnostics.performanceMetrics.updateTotalMs)}`;
+        this.target.appendChild(performance);
+    }
+
+    private updatePerformanceMini(diagnostics: TableDiagnostics): void {
+        const performance = this.target.querySelector(".performance-mini");
+        if (performance) {
+            performance.textContent = `Tiempo total: ${this.formatMs(diagnostics.performanceMetrics.updateTotalMs)}`;
+        }
+    }
+
+    private appendFinalLoadingPanel(diagnostics: TableDiagnostics): void {
+        const panel = document.createElement("section");
+        panel.className = "unit-summary-view";
+
+        const title = document.createElement("h1");
+        title.textContent = "RESUMEN POR UNIDADES GERENCIALES";
+        panel.appendChild(title);
+
+        const message = document.createElement("p");
+        message.className = "loading-message";
+        message.textContent = `Cargando datos acumulados: ${this.formatInteger(diagnostics.accumulatedFilas)} filas`;
+        panel.appendChild(message);
+
+        this.target.appendChild(panel);
     }
 
     private appendLoadingPanel(diagnostics: TableDiagnostics): void {
@@ -1190,15 +2101,19 @@ export class Visual implements IVisual {
             cardTitle.textContent = kpi.unit;
             card.appendChild(cardTitle);
 
+            if (kpi.unit === "UGSC") {
+                const subtitle = document.createElement("p");
+                subtitle.className = "unit-kpi-subtitle";
+                subtitle.textContent = "Unidad Gerencial de Supervisión y Convenios";
+                card.appendChild(subtitle);
+            }
+
             const list = document.createElement("dl");
             list.className = "unit-kpi-list";
 
-            [
-                ["Nro. Regiones", this.formatInteger(kpi.regiones)],
-                ["Nro. Colegios", this.formatInteger(kpi.colegios)],
-                ["Monto de inversion", this.formatNumber(kpi.montoIntervencion)],
-                ["Estudiantes beneficiarios", this.formatInteger(kpi.beneficiarios)]
-            ].forEach(([label, value]: string[]) => {
+            const items = this.buildUnitKpiItems(kpi);
+
+            items.forEach(([label, value]: string[]) => {
                 const term = document.createElement("dt");
                 term.textContent = label;
                 list.appendChild(term);
@@ -1209,10 +2124,87 @@ export class Visual implements IVisual {
             });
 
             card.appendChild(list);
+
+            if (kpi.unit === "UGME") {
+                this.appendUgmeGroupDetail(card, kpi.grupos);
+            }
+
             container.appendChild(card);
         });
 
         this.target.appendChild(container);
+    }
+
+    private buildUnitKpiItems(kpi: UnitKpiSummary): string[][] {
+        if (kpi.unit === "UGSC") {
+            return [
+                ["N° Regiones", this.formatInteger(kpi.regiones)],
+                ["N° Colegios", this.formatInteger(kpi.colegios)],
+                ["N° Solicitudes", this.formatInteger(kpi.solicitudes)],
+                ["Estudiantes Beneficiarios", this.formatInteger(kpi.beneficiarios)],
+                ["Solicitudes en revisión", this.formatInteger(kpi.solicitudesRevision)],
+                ["Solicitudes culminadas", this.formatInteger(kpi.solicitudesCulminadas)],
+                ["Monto de Inversión", this.formatNumber(kpi.montoIntervencion)]
+            ];
+        }
+
+        if (kpi.unit === "UGM") {
+            const porcentajeTransferencias = kpi.montoAsignado
+                ? (kpi.montoTransferencia / kpi.montoAsignado) * 100
+                : 0;
+
+            return [
+                ["N° Regiones", this.formatInteger(kpi.regiones)],
+                ["N° Colegios", this.formatInteger(kpi.colegios)],
+                ["Monto Programado", this.formatNumber(kpi.montoAsignado)],
+                ["Monto Transferido", this.formatNumber(kpi.montoTransferencia)],
+                ["% Transferencias", this.formatPercent(porcentajeTransferencias)],
+                ["Monto Retirado", this.formatNumber(kpi.montoRetirado)],
+                ["N° Colegios con Transferencia", this.formatInteger(kpi.colegiosConTransferencia)],
+                ["N° Colegios con Retiro", this.formatInteger(kpi.colegiosConRetiro)]
+            ];
+        }
+
+        if (kpi.unit === "UGME") {
+            return [
+                ["N° Regiones", this.formatInteger(kpi.regiones)],
+                ["N° Colegios", this.formatInteger(kpi.colegios)],
+                ["Monto de Inversión", this.formatNumber(kpi.montoIntervencion)]
+            ];
+        }
+
+        return [
+            ["Nro. Regiones", this.formatInteger(kpi.regiones)],
+            ["Nro. Colegios", this.formatInteger(kpi.colegios)],
+            ["Monto de inversion", this.formatNumber(kpi.montoIntervencion)],
+            ["Estudiantes beneficiarios", this.formatInteger(kpi.beneficiarios)]
+        ];
+    }
+
+    private appendUgmeGroupDetail(card: HTMLElement, grupos: GroupMetricSummary[]): void {
+        const subtitle = document.createElement("h4");
+        subtitle.textContent = "Detalle por grupo";
+        card.appendChild(subtitle);
+
+        const table = this.createTable([
+            "Grupo",
+            "Cantidad",
+            "Beneficiarios",
+            "Monto de Inversión"
+        ]);
+        const tbody = document.createElement("tbody");
+
+        grupos.forEach((grupo: GroupMetricSummary) => {
+            this.appendTableRow(tbody, [
+                grupo.grupo,
+                this.formatInteger(grupo.cantidad),
+                this.formatInteger(grupo.beneficiarios),
+                this.formatNumber(grupo.montoIntervencion)
+            ]);
+        });
+
+        table.appendChild(tbody);
+        card.appendChild(table);
     }
 
     private appendGlobalTotalsPanel(engine: AnalyticsEngine): void {
@@ -1619,6 +2611,7 @@ export class Visual implements IVisual {
             this.accumulatedRowCount = 0;
             this.fetchCount = 0;
             this.analyticsCache = null;
+            this.detailCacheByUnit = new Map<string, UnitDetailRow[]>();
             this.lastDatasetSignature = "";
             this.segmentLoadStartTime = undefined;
             this.allDataLoaded = false;
@@ -1636,9 +2629,18 @@ export class Visual implements IVisual {
             columnIndexes.unidadGerencial,
             columnIndexes.region,
             columnIndexes.provincia,
+            columnIndexes.distrito,
             columnIndexes.codigoLocal,
+            columnIndexes.nombreLocal,
+            columnIndexes.idSolicitud,
+            columnIndexes.estadoSolicitud,
             columnIndexes.montoIntervencion,
-            columnIndexes.beneficiarios
+            columnIndexes.beneficiarios,
+            columnIndexes.montoAsignado,
+            columnIndexes.montoTransferencia,
+            columnIndexes.montoRetirado,
+            columnIndexes.grupo,
+            columnIndexes.cantidad
         ].some((index: number) => index < 0);
     }
 
@@ -1664,6 +2666,15 @@ export class Visual implements IVisual {
         }
 
         return String(value);
+    }
+
+    private normalizeText(value: PrimitiveValue): string {
+        return this.displayValue(value)
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .trim()
+            .replace(/\s+/g, " ")
+            .toUpperCase();
     }
 
     private readString(row: DataViewTableRow, index: number, fallback = ""): string {
@@ -1692,6 +2703,17 @@ export class Visual implements IVisual {
     }
 
     private formatNumber(value: number): string {
+        return this.formatCurrencyNoDecimals(value);
+    }
+
+    private formatCurrencyNoDecimals(value: number): string {
+        return `S/ ${value.toLocaleString(undefined, {
+            maximumFractionDigits: 0,
+            minimumFractionDigits: 0
+        })}`;
+    }
+
+    private formatDecimal(value: number): string {
         return value.toLocaleString(undefined, {
             maximumFractionDigits: 2,
             minimumFractionDigits: 2
@@ -1705,7 +2727,7 @@ export class Visual implements IVisual {
     }
 
     private formatPercent(value: number): string {
-        return `${value.toFixed(2)}%`;
+        return `${value.toFixed(1)}%`;
     }
 
     private formatMs(value: number): string {
@@ -1738,12 +2760,18 @@ export class Visual implements IVisual {
             this.valueKey(record.provincia),
             this.valueKey(record.distrito),
             this.valueKey(record.codigoLocal),
+            this.valueKey(record.nombreLocal),
             this.valueKey(record.idSolicitud),
             this.valueKey(record.unidadGerencial),
             this.valueKey(record.estadoSolicitud),
             this.valueKey(record.nivelRiesgo),
+            this.valueKey(record.grupo),
             record.montoIntervencion.toString(),
             record.beneficiarios.toString(),
+            record.cantidad.toString(),
+            record.montoAsignado.toString(),
+            record.montoTransferencia.toString(),
+            record.montoRetirado.toString(),
             record.montoInversion.toString(),
             record.latitud.toString(),
             record.longitud.toString()
