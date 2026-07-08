@@ -248,6 +248,11 @@ interface UnitKpiCell {
     value: string;
 }
 
+interface SvgIconShape {
+    tag: "circle" | "path" | "rect";
+    attrs: Record<string, string>;
+}
+
 type InternalFilterKey = "region" | "provincia" | "distrito" | "codigoLocal" | "nombreLocal";
 
 interface InternalFilters {
@@ -268,6 +273,7 @@ interface UnitDetailRow {
     unit: UnitKpiName;
     codigoLocal: string;
     nombreLocal: string;
+    nivelRiesgo: string;
     region: string;
     provincia: string;
     distrito: string;
@@ -286,6 +292,16 @@ interface UnitDetailRow {
 interface DetailColumn {
     label: string;
     value: (row: UnitDetailRow) => string;
+}
+
+interface SchoolSummaryRow {
+    codigoLocal: string;
+    nombreLocal: string;
+    nivelRiesgo: string;
+    region: string;
+    provincia: string;
+    distrito: string;
+    units: Set<UnitKpiName>;
 }
 
 interface RegionTooltipSummary {
@@ -393,6 +409,7 @@ interface RecordKeys {
 
 interface PerformanceMetrics {
     updateTotalMs: number;
+    firstUpdateWaitMs?: number;
     segmentLoadMs: number;
     readDataViewMs: number;
     findColumnsMs: number;
@@ -1259,6 +1276,8 @@ export class Visual implements IVisual {
     private lastAccumulatedIncomingSignature = "";
     private lastColumnSignature = "";
     private segmentLoadStartTime?: number;
+    private readonly visualCreatedAt = performance.now();
+    private firstUpdateCaptured = false;
     private updateCount = 0;
     private cacheUseSequence = 0;
     private currentView: VisualView = "summary";
@@ -1272,6 +1291,7 @@ export class Visual implements IVisual {
         codigoLocal: "",
         nombreLocal: ""
     };
+    private dimensionStringPool: Map<string, string> = new Map<string, string>();
     private openInternalFilter: InternalFilterKey | null = null;
     private internalFilterAnalyticsCache: Map<string, AnalyticsEngine> = new Map<string, AnalyticsEngine>();
     private autoFocusedRegion: string | null = null;
@@ -1283,22 +1303,41 @@ export class Visual implements IVisual {
     private latestDiagnostics: TableDiagnostics | null = null;
     private detailModalUnit: UnitKpiName | null = null;
     private isDetailModalOpen = false;
+    private isSchoolListModalOpen = false;
+    private schoolListRegionFilter: string | null = null;
+    private selectedSchoolKey: string | null = null;
+    private selectedSchoolTab: UnitKpiName = "UGRD";
     private detailSearchText = "";
     private detailPage = 1;
     private detailPageSize = 20;
     private detailCacheByUnit: Map<string, UnitDetailRow[]> = new Map<string, UnitDetailRow[]>();
     private readonly maxAnalyticsCacheEntries = 4;
     private readonly maxDetailCacheEntries = 1;
+    private readonly maxSchoolPointIndexes = 30000;
     private readonly enableAnalyticsCache = false;
-    private readonly enableInterimLoadingRender = false;
+    private readonly enableInternalFilterAnalyticsCache = false;
+    private readonly enableInterimLoadingRender = true;
     private readonly enableSelectedRegionCache = false;
     private readonly enableSegmentAutoFetch = true;
     private readonly useCurrentDataViewOnly = false;
-    private readonly enableRuntimeLogs = false;
     private formattingSettings: VisualFormattingSettingsModel = new VisualFormattingSettingsModel();
     private formattingSettingsService: FormattingSettingsService;
     private handleKeydown = (event: KeyboardEvent): void => {
-        if (event.key === "Escape" && this.isDetailModalOpen) {
+        if (event.key !== "Escape") {
+            return;
+        }
+
+        if (this.selectedSchoolKey) {
+            this.closeSchoolInterventionsModal();
+            return;
+        }
+
+        if (this.isSchoolListModalOpen) {
+            this.closeSchoolListModal();
+            return;
+        }
+
+        if (this.isDetailModalOpen) {
             this.closeDetailModal();
         }
     };
@@ -1313,12 +1352,18 @@ export class Visual implements IVisual {
 
     public destroy(): void {
         this.removeLeafletMap();
+        this.disposeHeavyState();
+        this.target.replaceChildren();
         window.removeEventListener("keydown", this.handleKeydown);
     }
 
     public update(options: VisualUpdateOptions): void {
         this.updateCount += 1;
         const updateStart = performance.now();
+        const firstUpdateWaitMs = this.firstUpdateCaptured
+            ? undefined
+            : updateStart - this.visualCreatedAt;
+        this.firstUpdateCaptured = true;
         const fetchWaitMs = this.lastFetchClickTime
             ? performance.now() - this.lastFetchClickTime
             : undefined;
@@ -1343,8 +1388,6 @@ export class Visual implements IVisual {
                 diagnostics.accumulatedFilas,
                 diagnostics.performanceMetrics.updateTotalMs
             );
-            this.updatePerformancePanel(diagnostics);
-            this.updatePerformanceMini(diagnostics);
             return;
         }
 
@@ -1358,7 +1401,7 @@ export class Visual implements IVisual {
             );
         }
 
-        const diagnostics = this.buildDiagnostics(dataViews, fetchWaitMs, options.operationKind);
+        const diagnostics = this.buildDiagnostics(dataViews, fetchWaitMs, options.operationKind, firstUpdateWaitMs);
         this.latestDiagnostics = diagnostics;
 
         const renderStart = performance.now();
@@ -1373,8 +1416,6 @@ export class Visual implements IVisual {
             diagnostics.accumulatedFilas,
             diagnostics.performanceMetrics.updateTotalMs
         );
-        this.updatePerformancePanel(diagnostics);
-        this.updatePerformanceMini(diagnostics);
     }
 
     private renderCurrentView(): void {
@@ -1401,10 +1442,12 @@ export class Visual implements IVisual {
     private buildDiagnostics(
         dataViews: DataView[],
         fetchWaitMs?: number,
-        operationKind?: powerbi.VisualDataChangeOperationKind
+        operationKind?: powerbi.VisualDataChangeOperationKind,
+        firstUpdateWaitMs?: number
     ): TableDiagnostics {
         const performanceMetrics: PerformanceMetrics = {
             updateTotalMs: 0,
+            firstUpdateWaitMs,
             segmentLoadMs: 0,
             readDataViewMs: 0,
             findColumnsMs: 0,
@@ -1452,46 +1495,20 @@ export class Visual implements IVisual {
         performanceMetrics.buildRecordsMs = buildRecordsResult.ms;
 
         const records = buildRecordsResult.value;
-        const datasetChanged = this.resetAccumulationIfDatasetChanged(records, columns, hasMoreData, operationKind);
+        this.resetAccumulationIfDatasetChanged(records, columns, hasMoreData, operationKind);
+
+        if (this.isFetching && fetchWaitMs !== undefined) {
+            this.isFetching = false;
+        }
+
+        this.requestMoreDataIfNeeded(hasMoreData, performanceMetrics);
 
         const incomingDataSignature = this.lastIncomingDataSignature;
         const accumulateResult = measure("accumulateRows", () => this.accumulateRecords(records, hasMoreData, incomingDataSignature));
         performanceMetrics.accumulateRowsMs = accumulateResult.ms;
         this.accumulatedRowCount = this.accumulatedRowCount || records.length;
-        this.logDataFlow("after-accumulate", {
-            hasMoreData,
-            datasetChanged,
-            segmentRows: records.length,
-            accumulatedRows: this.accumulatedRowCount,
-            isFetching: this.isFetching,
-            allDataLoaded: this.allDataLoaded,
-            operationKind,
-            incomingSignature: incomingDataSignature,
-            lastDatasetSignature: this.lastDatasetSignature
-        });
-        if (this.isFetching && fetchWaitMs !== undefined) {
-            this.isFetching = false;
-        }
-
         if (hasMoreData && this.enableSegmentAutoFetch) {
-            this.allDataLoaded = false;
-            if (this.segmentLoadStartTime === undefined) {
-                this.segmentLoadStartTime = performance.now();
-            }
-
-            if (!this.isFetching) {
-                this.isFetching = true;
-                this.fetchCount += 1;
-                this.lastFetchClickTime = performance.now();
-                this.host.fetchMoreData();
-            }
-
-            performanceMetrics.fetchCount = this.fetchCount;
-            performanceMetrics.segmentLoadMs = this.segmentLoadStartTime === undefined
-                ? 0
-                : performance.now() - this.segmentLoadStartTime;
-
-            const interimAnalyticsResult = this.enableInterimLoadingRender && datasetChanged && this.accumulatedRowCount
+            const interimAnalyticsResult = this.enableInterimLoadingRender && this.accumulatedRowCount
                 ? measure("buildInterimAnalyticsEngine", () => this.incrementalAnalytics || AnalyticsEngine.build(this.accumulatedRows))
                 : null;
             const interimAnalytics = interimAnalyticsResult?.value || null;
@@ -1586,13 +1603,6 @@ export class Visual implements IVisual {
         performanceMetrics.analyticsRebuilt = analyticsRebuilt;
         performanceMetrics.rowsPerSecond = this.calculateProcessingRate(this.accumulatedRowCount, performanceMetrics.buildAnalyticsEngineMs || performanceMetrics.updateTotalMs);
         performanceMetrics.msPer10kRows = this.calculateMsPer10k(this.accumulatedRowCount, performanceMetrics.buildAnalyticsEngineMs || performanceMetrics.updateTotalMs);
-        this.logDataFlow("final-render", {
-            datasetSignature,
-            accumulatedRows: this.accumulatedRowCount,
-            analyticsCacheHit,
-            analyticsRebuilt,
-            buildAnalyticsEngineMs: performanceMetrics.buildAnalyticsEngineMs
-        });
 
         return {
             dataViewCount: dataViews.length,
@@ -1637,6 +1647,27 @@ export class Visual implements IVisual {
         };
     }
 
+    private requestMoreDataIfNeeded(hasMoreData: boolean, performanceMetrics: PerformanceMetrics): void {
+        if (!hasMoreData || !this.enableSegmentAutoFetch) {
+            return;
+        }
+
+        this.allDataLoaded = false;
+        if (this.segmentLoadStartTime === undefined) {
+            this.segmentLoadStartTime = performance.now();
+        }
+
+        if (!this.isFetching) {
+            this.isFetching = true;
+            this.fetchCount += 1;
+            this.lastFetchClickTime = performance.now();
+            this.host.fetchMoreData();
+        }
+
+        performanceMetrics.fetchCount = this.fetchCount;
+        performanceMetrics.segmentLoadMs = performance.now() - this.segmentLoadStartTime;
+    }
+
     private findColumnIndexByRole(columns: DataViewMetadataColumn[], roleName: string): number {
         return columns.findIndex((column: DataViewMetadataColumn) => !!column.roles?.[roleName]);
     }
@@ -1647,9 +1678,9 @@ export class Visual implements IVisual {
         }
 
         return rows.map((row: DataViewTableRow) => ({
-            unidadGerencial: this.readString(row, columnIndexes.unidadGerencial),
-            region: this.readString(row, columnIndexes.region),
-            provincia: this.readString(row, columnIndexes.provincia),
+            unidadGerencial: this.internDimensionString(this.readString(row, columnIndexes.unidadGerencial)),
+            region: this.internDimensionString(this.readString(row, columnIndexes.region)),
+            provincia: this.internDimensionString(this.readString(row, columnIndexes.provincia)),
             codigoLocal: this.readString(row, columnIndexes.codigoLocal),
             nombreLocal: this.readString(row, columnIndexes.nombreLocal, "-"),
             montoIntervencion: this.toNumber(row[columnIndexes.montoIntervencion]),
@@ -1657,12 +1688,12 @@ export class Visual implements IVisual {
             montoAsignado: this.toNumber(row[columnIndexes.montoAsignado]),
             montoTransferencia: this.toNumber(row[columnIndexes.montoTransferencia]),
             montoRetirado: this.toNumber(row[columnIndexes.montoRetirado]),
-            grupo: this.readString(row, columnIndexes.grupo),
+            grupo: this.internDimensionString(this.readString(row, columnIndexes.grupo)),
             cantidad: this.toNumber(row[columnIndexes.cantidad]),
-            distrito: this.readString(row, columnIndexes.distrito),
+            distrito: this.internDimensionString(this.readString(row, columnIndexes.distrito)),
             idSolicitud: this.readString(row, columnIndexes.idSolicitud),
-            estadoSolicitud: this.readString(row, columnIndexes.estadoSolicitud),
-            nivelRiesgo: this.readString(row, columnIndexes.nivelRiesgo),
+            estadoSolicitud: this.internDimensionString(this.readString(row, columnIndexes.estadoSolicitud)),
+            nivelRiesgo: this.internDimensionString(this.readString(row, columnIndexes.nivelRiesgo)),
             montoInversion: this.toNumber(row[columnIndexes.montoInversion]) || this.toNumber(row[columnIndexes.montoIntervencion]),
             latitud: this.toNumber(row[columnIndexes.latitud]),
             longitud: this.toNumber(row[columnIndexes.longitud])
@@ -1686,6 +1717,50 @@ export class Visual implements IVisual {
         this.accumulatedRowCount = 0;
         this.detailCacheByUnit = new Map<string, UnitDetailRow[]>();
         this.internalFilterAnalyticsCache = new Map<string, AnalyticsEngine>();
+        this.dimensionStringPool = new Map<string, string>();
+    }
+
+    private disposeHeavyState(): void {
+        this.resetStreamingState();
+        this.analyticsCache = null;
+        this.incrementalAnalytics = null;
+        this.analyticsCacheBySignature = new Map<string, AnalyticsCacheEntry>();
+        this.selectedRegionAnalyticsCache = null;
+        this.selectedRegionAnalyticsCacheKey = "";
+        this.latestDiagnostics = null;
+        this.lastDatasetSignature = "";
+        this.lastIncomingDataSignature = "";
+        this.lastAccumulatedIncomingSignature = "";
+        this.lastColumnSignature = "";
+        this.segmentLoadStartTime = undefined;
+        this.lastFetchClickTime = undefined;
+        this.isFetching = false;
+        this.allDataLoaded = false;
+        this.fetchCount = 0;
+        this.cacheUseSequence = 0;
+        this.currentView = "summary";
+        this.selectedRiskView = "Total";
+        this.internalFilters = {
+            region: "",
+            provincia: "",
+            distrito: "",
+            codigoLocal: "",
+            nombreLocal: ""
+        };
+        this.selectedRegion = null;
+        this.openInternalFilter = null;
+        this.autoFocusedRegion = null;
+        this.suppressedAutoFocusSignature = "";
+        this.activeMapDrillKey = "";
+        this.mapContextMenu = null;
+        this.detailModalUnit = null;
+        this.isDetailModalOpen = false;
+        this.isSchoolListModalOpen = false;
+        this.schoolListRegionFilter = null;
+        this.selectedSchoolKey = null;
+        this.selectedSchoolTab = "UGRD";
+        this.detailSearchText = "";
+        this.detailPage = 1;
     }
 
     private accumulateRecords(records: SourceRecord[], hasMoreData: boolean, incomingDataSignature: string): void {
@@ -1772,6 +1847,10 @@ export class Visual implements IVisual {
         const regionKey = this.normalizeRegionForMap(record.region);
         this.updateMapPointAccumulator(this.streamingIndexes.provinciaPoints, regionKey, record.provincia, record);
         this.updateMapPointAccumulator(this.streamingIndexes.distritoPoints, regionKey, record.distrito, record);
+        if (this.streamingIndexes.schoolPoints.length >= this.maxSchoolPointIndexes) {
+            return;
+        }
+
         this.streamingIndexes.schoolPoints.push({
             regionKey,
             label: record.codigoLocal || record.nombreLocal || "-",
@@ -1820,6 +1899,7 @@ export class Visual implements IVisual {
             unit,
             codigoLocal: record.codigoLocal || "-",
             nombreLocal: record.nombreLocal || "-",
+            nivelRiesgo: record.nivelRiesgo || "-",
             region: record.region || "-",
             provincia: record.provincia || "-",
             distrito: record.distrito || "-",
@@ -1866,58 +1946,60 @@ export class Visual implements IVisual {
 
         if (!diagnostics.hasTable) {
             this.appendMessage("No table DataView received.");
-            this.appendPerformanceMini(diagnostics);
             return;
         }
 
         if (this.hasMissingRole(diagnostics.columnIndexes)) {
             this.appendMessage("Missing one or more required roles for unit KPI cards.");
-            this.appendPerformanceMini(diagnostics);
             return;
         }
 
         if (diagnostics.isLoading && diagnostics.analytics) {
             this.reconcileInternalFilters();
             const renderAnalytics = this.getInternalFilteredAnalytics(diagnostics.analytics);
+            const mapAnalytics = this.getInternalFilteredAnalytics(diagnostics.analytics, false);
             if (this.currentView === "ugme") {
-                this.appendUgmeView(renderAnalytics);
+                this.appendUgmeView(renderAnalytics, mapAnalytics);
             } else {
-                this.appendSummaryView(renderAnalytics);
+                this.appendSummaryView(renderAnalytics, mapAnalytics);
             }
 
-            this.appendLoadingStatusBadge(diagnostics);
-            this.appendPerformanceMini(diagnostics);
             return;
         }
 
         if (diagnostics.isLoading) {
             this.appendFinalLoadingPanel(diagnostics);
-            this.appendPerformanceMini(diagnostics);
             return;
         }
 
         if (!diagnostics.analytics) {
             this.appendMessage("Analytics Engine is not available.");
-            this.appendPerformanceMini(diagnostics);
             return;
         }
 
         this.reconcileInternalFilters();
         const renderAnalytics = this.getInternalFilteredAnalytics(diagnostics.analytics);
+        const mapAnalytics = this.getInternalFilteredAnalytics(diagnostics.analytics, false);
         if (this.currentView === "ugme") {
-            this.appendUgmeView(renderAnalytics);
+            this.appendUgmeView(renderAnalytics, mapAnalytics);
         } else {
-            this.appendSummaryView(renderAnalytics);
+            this.appendSummaryView(renderAnalytics, mapAnalytics);
         }
 
         if (this.isDetailModalOpen && this.detailModalUnit) {
             this.appendDetailModal(this.detailModalUnit);
         }
 
-        this.appendPerformanceMini(diagnostics);
+        if (this.isSchoolListModalOpen) {
+            this.appendSchoolListModal();
+        }
+
+        if (this.selectedSchoolKey) {
+            this.appendSchoolInterventionsModal(this.selectedSchoolKey);
+        }
     }
 
-    private appendSummaryView(engine: AnalyticsEngine): void {
+    private appendSummaryView(engine: AnalyticsEngine, mapEngine: AnalyticsEngine = engine): void {
         const view = document.createElement("section");
         view.className = "dashboard-root with-internal-filters";
         this.appendInternalFilterBar(view);
@@ -1927,7 +2009,7 @@ export class Visual implements IVisual {
 
         const mapPanel = document.createElement("section");
         mapPanel.className = "map-panel";
-        this.appendPeruRiskMap(mapPanel, engine);
+        this.appendPeruRiskMap(mapPanel, mapEngine);
         layout.appendChild(mapPanel);
 
         const unitsPanel = this.createSummaryUnitsPanel(engine);
@@ -1945,11 +2027,22 @@ export class Visual implements IVisual {
 
         this.appendInformationBanner(unitsPanel, unitEngine);
 
+        const header = document.createElement("div");
+        header.className = "units-panel-header";
+
         const title = document.createElement("h1");
         title.textContent = this.selectedRegion
             ? `RESUMEN POR UNIDADES GERENCIALES - ${this.selectedRegion}`
             : "RESUMEN POR UNIDADES GERENCIALES";
-        unitsPanel.appendChild(title);
+        header.appendChild(title);
+
+        const detailButton = document.createElement("button");
+        detailButton.className = "units-detail-button";
+        detailButton.type = "button";
+        detailButton.textContent = "Ver detalle";
+        detailButton.onclick = () => this.openSchoolListModal(this.selectedRegion);
+        header.appendChild(detailButton);
+        unitsPanel.appendChild(header);
 
         const grid = document.createElement("div");
         grid.className = "unit-grid";
@@ -2031,6 +2124,8 @@ export class Visual implements IVisual {
                 nombreLocal: ""
             };
             this.openInternalFilter = null;
+            this.detailPage = 1;
+            this.internalFilterAnalyticsCache = new Map<string, AnalyticsEngine>();
             this.clearInteractiveSelectionState();
             this.renderCurrentView();
         };
@@ -2165,6 +2260,8 @@ export class Visual implements IVisual {
         }
 
         this.openInternalFilter = null;
+        this.detailPage = 1;
+        this.internalFilterAnalyticsCache = new Map<string, AnalyticsEngine>();
         this.clearInteractiveSelectionState();
         this.renderCurrentView();
     }
@@ -2188,11 +2285,19 @@ export class Visual implements IVisual {
         );
     }
 
+    private hasRiskFilter(): boolean {
+        return this.selectedRiskView !== "Total";
+    }
+
+    private hasDashboardFilters(includeRiskFilter = true): boolean {
+        return this.hasInternalFilters() || (includeRiskFilter && this.hasRiskFilter());
+    }
+
     private getInternalFilterOptions(key: InternalFilterKey): string[] {
         const values = new Set<string>();
 
         this.accumulatedRows.forEach((record: SourceRecord) => {
-            if (!this.recordMatchesInternalFilters(record, key)) {
+            if (!this.recordMatchesDashboardFilters(record, key)) {
                 return;
             }
 
@@ -2205,8 +2310,12 @@ export class Visual implements IVisual {
         return Array.from(values).sort((left: string, right: string) => left.localeCompare(right));
     }
 
-    private recordMatchesInternalFilters(record: SourceRecord, ignoreKey?: InternalFilterKey): boolean {
+    private recordMatchesDashboardFilters(record: SourceRecord, ignoreKey?: InternalFilterKey, includeRiskFilter = true): boolean {
         const filters = this.internalFilters;
+
+        if (includeRiskFilter && !this.recordMatchesSelectedRisk(record)) {
+            return false;
+        }
 
         if (ignoreKey !== "region" && filters.region && this.normalizeText(record.region) !== this.normalizeText(filters.region)) {
             return false;
@@ -2239,7 +2348,7 @@ export class Visual implements IVisual {
 
             const exists = this.accumulatedRows.some((record: SourceRecord) => (
                 this.normalizeText(record[key]) === this.normalizeText(this.internalFilters[key]) &&
-                this.recordMatchesInternalFilters(record, key)
+                this.recordMatchesDashboardFilters(record, key)
             ));
 
             if (!exists) {
@@ -2248,39 +2357,45 @@ export class Visual implements IVisual {
         });
     }
 
-    private getInternalFilteredAnalytics(baseEngine: AnalyticsEngine): AnalyticsEngine {
-        if (!this.hasInternalFilters() || !this.accumulatedRows.length) {
+    private getInternalFilteredAnalytics(baseEngine: AnalyticsEngine, includeRiskFilter = true): AnalyticsEngine {
+        if (!this.hasDashboardFilters(includeRiskFilter) || !this.accumulatedRows.length) {
             return baseEngine;
         }
 
-        const filterKey = this.getInternalFilterCacheKey();
-        const cached = this.internalFilterAnalyticsCache.get(filterKey);
-        if (cached) {
-            return cached;
+        const filterKey = this.getInternalFilterCacheKey(includeRiskFilter);
+        if (this.enableInternalFilterAnalyticsCache) {
+            const cached = this.internalFilterAnalyticsCache.get(filterKey);
+            if (cached) {
+                return cached;
+            }
         }
 
-        const filteredRows = this.accumulatedRows.filter((record: SourceRecord) => this.recordMatchesInternalFilters(record));
+        const filteredRows = this.accumulatedRows.filter((record: SourceRecord) => this.recordMatchesDashboardFilters(record, undefined, includeRiskFilter));
         const filteredEngine = AnalyticsEngine.build(filteredRows);
-        this.internalFilterAnalyticsCache.set(filterKey, filteredEngine);
 
-        if (this.internalFilterAnalyticsCache.size > 4) {
-            const oldestKey = this.internalFilterAnalyticsCache.keys().next().value;
-            if (oldestKey) {
-                this.internalFilterAnalyticsCache.delete(oldestKey);
+        if (this.enableInternalFilterAnalyticsCache) {
+            this.internalFilterAnalyticsCache.set(filterKey, filteredEngine);
+
+            if (this.internalFilterAnalyticsCache.size > 1) {
+                const oldestKey = this.internalFilterAnalyticsCache.keys().next().value;
+                if (oldestKey) {
+                    this.internalFilterAnalyticsCache.delete(oldestKey);
+                }
             }
         }
 
         return filteredEngine;
     }
 
-    private getInternalFilterCacheKey(): string {
+    private getInternalFilterCacheKey(includeRiskFilter = true): string {
         return [
             this.lastDatasetSignature,
             this.normalizeText(this.internalFilters.region),
             this.normalizeText(this.internalFilters.provincia),
             this.normalizeText(this.internalFilters.distrito),
             this.normalizeText(this.internalFilters.codigoLocal),
-            this.normalizeText(this.internalFilters.nombreLocal)
+            this.normalizeText(this.internalFilters.nombreLocal),
+            includeRiskFilter ? this.selectedRiskView : "Total"
         ].join("|");
     }
 
@@ -2442,6 +2557,11 @@ export class Visual implements IVisual {
             button.textContent = option.label;
             button.onclick = () => {
                 this.hideMapContextMenu();
+                if (option.mode === "colegios") {
+                    this.openSchoolListModal(regionName);
+                    return;
+                }
+
                 this.showRegionDrillLayer(map, regionName, option.mode);
             };
             menu.appendChild(button);
@@ -2712,19 +2832,6 @@ export class Visual implements IVisual {
         });
 
         return tooltip;
-
-        [
-            ["N° Colegios", this.formatInteger(aggregate?.totalColegios || 0)],
-            ["N° Provincias", this.formatInteger(aggregate?.totalProvincias || 0)],
-            ["N° Colegio - Riesgo Bajo", this.formatInteger(aggregate?.riskBreakdown.bajo || 0)],
-            ["N° Colegio - Riesgo Medio", this.formatInteger(aggregate?.riskBreakdown.medio || 0)],
-            ["N° Colegio - Riesgo Alto", this.formatInteger(aggregate?.riskBreakdown.alto || 0)],
-            ["N° Colegio - Riesgo Muy Alto", this.formatInteger(aggregate?.riskBreakdown.muyAlto || 0)]
-        ].forEach(([label, value]: string[]) => {
-            this.appendTooltipRow(tooltip, label, value);
-        });
-
-        return tooltip;
     }
 
     private getRegionTooltipRows(aggregate: RegionAggregate | undefined): string[][] {
@@ -2736,19 +2843,19 @@ export class Visual implements IVisual {
                 : 0;
 
             return [
-                ["Colegios", this.formatInteger(totalColegios), "region-tooltip-row-main"],
-                [this.selectedRiskView, this.formatInteger(selectedRiskCount), this.getRiskTooltipClass(this.selectedRiskView)],
+                ["N° Colegios Totales", this.formatInteger(totalColegios), "region-tooltip-row-main"],
+                [`N° Colegios - Riesgo ${this.selectedRiskView}`, this.formatInteger(selectedRiskCount), this.getRiskTooltipClass(this.selectedRiskView)],
                 ["Porcentaje", this.formatPercentFromRatio(this.getSelectedRiskPercentage(aggregate)), "region-tooltip-percent"]
             ];
         }
 
         return [
-            ["Colegios", this.formatInteger(totalColegios), "region-tooltip-row-main"],
-            ["Provincias", this.formatInteger(aggregate?.totalProvincias || 0), "region-tooltip-row-main"],
-            ["Bajo", this.formatInteger(aggregate?.riskBreakdown.bajo || 0), "risk-low"],
-            ["Medio", this.formatInteger(aggregate?.riskBreakdown.medio || 0), "risk-medium"],
-            ["Alto", this.formatInteger(aggregate?.riskBreakdown.alto || 0), "risk-high"],
-            ["Muy alto", this.formatInteger(aggregate?.riskBreakdown.muyAlto || 0), "risk-critical"]
+            ["N° Colegios Totales", this.formatInteger(totalColegios), "region-tooltip-row-main"],
+            ["N° Provincias", this.formatInteger(aggregate?.totalProvincias || 0), "region-tooltip-row-main"],
+            ["N° Colegios - Riesgo Bajo", this.formatInteger(aggregate?.riskBreakdown.bajo || 0), "risk-low"],
+            ["N° Colegios - Riesgo Medio", this.formatInteger(aggregate?.riskBreakdown.medio || 0), "risk-medium"],
+            ["N° Colegios - Riesgo Alto", this.formatInteger(aggregate?.riskBreakdown.alto || 0), "risk-high"],
+            ["N° Colegios - Riesgo Muy Alto", this.formatInteger(aggregate?.riskBreakdown.muyAlto || 0), "risk-critical"]
         ];
     }
 
@@ -2936,6 +3043,10 @@ export class Visual implements IVisual {
             button.textContent = mode;
             button.onclick = () => {
                 this.selectedRiskView = mode;
+                this.detailPage = 1;
+                this.internalFilterAnalyticsCache = new Map<string, AnalyticsEngine>();
+                this.selectedRegionAnalyticsCache = null;
+                this.selectedRegionAnalyticsCacheKey = "";
                 this.renderCurrentView();
             };
             toggle.appendChild(button);
@@ -2949,14 +3060,22 @@ export class Visual implements IVisual {
             return engine;
         }
 
-        const cacheKey = `${this.lastDatasetSignature}|${this.normalizeRegionForMap(this.selectedRegion)}`;
+        const cacheKey = `${this.getInternalFilterCacheKey()}|${this.normalizeRegionForMap(this.selectedRegion)}`;
         if (this.enableSelectedRegionCache && this.selectedRegionAnalyticsCache && this.selectedRegionAnalyticsCacheKey === cacheKey) {
             return this.selectedRegionAnalyticsCache;
         }
 
-        const selectedKey = this.normalizeRegionForMap(this.selectedRegion);
-        const filteredEngine = this.streamingIndexes.regionAnalytics.get(selectedKey) || AnalyticsEngine.createEmpty();
-        filteredEngine.finalizeBuild();
+        const filteredRows = this.accumulatedRows.filter((record: SourceRecord) => (
+            this.recordMatchesDashboardFilters(record) &&
+            this.isRegionNameSelected(record.region)
+        ));
+        const filteredEngine = filteredRows.length
+            ? AnalyticsEngine.build(filteredRows)
+            : AnalyticsEngine.createEmpty();
+        if (!filteredRows.length) {
+            filteredEngine.finalizeBuild();
+        }
+
         if (this.enableSelectedRegionCache) {
             this.selectedRegionAnalyticsCache = filteredEngine;
             this.selectedRegionAnalyticsCacheKey = cacheKey;
@@ -3102,7 +3221,7 @@ export class Visual implements IVisual {
             .replace("LIMA PROVINCIAS", "LIMA PROV.");
     }
 
-    private appendUgmeView(engine: AnalyticsEngine): void {
+    private appendUgmeView(engine: AnalyticsEngine, mapEngine: AnalyticsEngine = engine): void {
         const view = document.createElement("section");
         view.className = "dashboard-root ugme-dashboard-view with-internal-filters";
         this.appendInternalFilterBar(view);
@@ -3112,7 +3231,7 @@ export class Visual implements IVisual {
 
         const mapPanel = document.createElement("section");
         mapPanel.className = "map-panel";
-        this.appendPeruRiskMap(mapPanel, engine);
+        this.appendPeruRiskMap(mapPanel, mapEngine);
         layout.appendChild(mapPanel);
 
         const unitsPanel = this.createUgmeUnitsPanel(engine);
@@ -3290,7 +3409,7 @@ export class Visual implements IVisual {
 
         const icon = document.createElement("div");
         icon.className = "unit-card-icon";
-        icon.textContent = theme.icon;
+        this.appendIconSvg(icon, theme.icon);
         header.appendChild(icon);
 
         const titleGroup = document.createElement("div");
@@ -3306,13 +3425,6 @@ export class Visual implements IVisual {
         subtitle.textContent = theme.name;
         titleGroup.appendChild(subtitle);
         header.appendChild(titleGroup);
-
-        const detailLink = document.createElement("button");
-        detailLink.className = "unit-card-detail-link";
-        detailLink.type = "button";
-        detailLink.textContent = "Ver detalle";
-        detailLink.onclick = () => this.openDetailModal(kpi.unit);
-        header.appendChild(detailLink);
 
         card.appendChild(header);
 
@@ -3361,15 +3473,18 @@ export class Visual implements IVisual {
         const kpiGrid = document.createElement("div");
         kpiGrid.className = "ugme-hero-kpis";
         [
-            { icon: "RG", label: "N° Regiones", value: this.formatInteger(kpi.regiones) },
-            { icon: "CL", label: "N° Colegios", value: this.formatInteger(kpi.colegios) },
-            { icon: "S/", label: "Monto", value: this.formatMillions(kpi.montoIntervencion) }
+            { icon: "map-pin", label: "N° Regiones", value: this.formatInteger(kpi.regiones) },
+            { icon: "school", label: "N° Colegios", value: this.formatInteger(kpi.colegios) },
+            { icon: "money", label: "Monto Total", value: this.formatMillions(kpi.montoIntervencion) }
         ].forEach((item: UnitKpiCell) => kpiGrid.appendChild(this.createUgmeHeroKpi(item)));
         hero.appendChild(kpiGrid);
         card.appendChild(hero);
 
-        this.appendUgmeGroupSection(card, "MODULARES", this.getUgmeModularGroups(kpi.grupos), "ugme-section-modulares");
-        this.appendUgmeGroupSection(card, "MOBILIARIO Y EQUIPAMIENTO", this.getUgmeMobiliarioGroups(kpi.grupos), "ugme-section-mobiliario");
+        const sections = document.createElement("div");
+        sections.className = "ugme-detail-sections";
+        this.appendUgmeGroupSection(sections, "MODULOS PREFABRICADOS", this.getUgmeModularGroups(kpi.grupos), "ugme-section-modulares");
+        this.appendUgmeGroupSection(sections, "MOBILIARIO Y EQUIPAMIENTO", this.getUgmeMobiliarioGroups(kpi.grupos), "ugme-section-mobiliario");
+        card.appendChild(sections);
 
         return card;
     }
@@ -3379,7 +3494,7 @@ export class Visual implements IVisual {
         card.className = "ugme-hero-kpi";
 
         const icon = document.createElement("span");
-        icon.textContent = item.icon;
+        this.appendIconSvg(icon, item.icon);
         card.appendChild(icon);
 
         const content = document.createElement("div");
@@ -3400,31 +3515,31 @@ export class Visual implements IVisual {
             UGRD: {
                 color: "#f97316",
                 background: "#fff7ed",
-                icon: "R",
+                icon: "shield",
                 name: "Unidad Gerencial de Reconstruccion y Descentralizacion"
             },
             UGSC: {
                 color: "#7c3aed",
                 background: "#f5f3ff",
-                icon: "S",
+                icon: "briefcase",
                 name: "Unidad Gerencial de Supervision y Convenios"
             },
             UGEO: {
                 color: "#2563eb",
                 background: "#eff6ff",
-                icon: "E",
+                icon: "home",
                 name: "Unidad Gerencial de Estudios y Obras"
             },
             UGM: {
                 color: "#16a34a",
                 background: "#f0fdf4",
-                icon: "M",
+                icon: "home",
                 name: "Unidad Gerencial de Mantenimiento"
             },
             UGME: {
                 color: "#0891b2",
                 background: "#ecfeff",
-                icon: "ME",
+                icon: "package",
                 name: "Unidad Gerencial de Mobiliario y Equipamiento"
             }
         };
@@ -3435,13 +3550,13 @@ export class Visual implements IVisual {
     private getUnitKpiCells(kpi: UnitKpiSummary): UnitKpiCell[] {
         if (kpi.unit === "UGSC") {
             return [
-                { icon: "RG", label: "N° Regiones", value: this.formatInteger(kpi.regiones) },
-                { icon: "CL", label: "N° Colegios", value: this.formatInteger(kpi.colegios) },
-                { icon: "SO", label: "N° Solicitudes", value: this.formatInteger(kpi.solicitudes) },
-                { icon: "EB", label: "Estudiantes Beneficiarios", value: this.formatInteger(kpi.beneficiarios) },
-                { icon: "ER", label: "Solicitudes en revision", value: this.formatInteger(kpi.solicitudesRevision) },
-                { icon: "CU", label: "Solicitudes culminadas", value: this.formatInteger(kpi.solicitudesCulminadas) },
-                { icon: "MI", label: "Monto", value: this.formatNumber(kpi.montoIntervencion) }
+                { icon: "clock", label: "N° Regiones", value: this.formatInteger(kpi.regiones) },
+                { icon: "school", label: "N° Colegios", value: this.formatInteger(kpi.colegios) },
+                { icon: "document", label: "N° Solicitudes", value: this.formatInteger(kpi.solicitudes) },
+                { icon: "users", label: "Estudiantes Beneficiarios", value: this.formatInteger(kpi.beneficiarios) },
+                { icon: "document", label: "Solicitudes en revision", value: this.formatInteger(kpi.solicitudesRevision) },
+                { icon: "document", label: "Solicitudes culminadas", value: this.formatInteger(kpi.solicitudesCulminadas) },
+                { icon: "money", label: "Monto de Inversion", value: this.formatNumber(kpi.montoIntervencion) }
             ];
         }
 
@@ -3451,30 +3566,30 @@ export class Visual implements IVisual {
                 : 0;
 
             return [
-                { icon: "RG", label: "N° Regiones", value: this.formatInteger(kpi.regiones) },
-                { icon: "CL", label: "N° Colegios", value: this.formatInteger(kpi.colegios) },
-                { icon: "MP", label: "Monto Programado", value: this.formatNumber(kpi.montoAsignado) },
-                { icon: "MT", label: "Monto Transferido", value: this.formatNumber(kpi.montoTransferencia) },
-                { icon: "%", label: "% Transferencias", value: this.formatPercent(porcentajeTransferencias) },
-                { icon: "MR", label: "Monto Retirado", value: this.formatNumber(kpi.montoRetirado) },
-                { icon: "CT", label: "N° Colegios con Transferencia", value: this.formatInteger(kpi.colegiosConTransferencia) },
-                { icon: "CR", label: "N° Colegios con Retiro", value: this.formatInteger(kpi.colegiosConRetiro) }
+                { icon: "clock", label: "N° Regiones", value: this.formatInteger(kpi.regiones) },
+                { icon: "school", label: "N° Colegios", value: this.formatInteger(kpi.colegios) },
+                { icon: "money", label: "Monto Programado", value: this.formatNumber(kpi.montoAsignado) },
+                { icon: "money", label: "Monto Transferido", value: this.formatNumber(kpi.montoTransferencia) },
+                { icon: "percent", label: "% Transferencias", value: this.formatPercent(porcentajeTransferencias) },
+                { icon: "money", label: "Monto Retirado", value: this.formatNumber(kpi.montoRetirado) },
+                { icon: "school", label: "N° Colegios con Transferencia", value: this.formatInteger(kpi.colegiosConTransferencia) },
+                { icon: "school", label: "N° Colegios con Retiro", value: this.formatInteger(kpi.colegiosConRetiro) }
             ];
         }
 
         if (kpi.unit === "UGME") {
             return [
-                { icon: "RG", label: "N° Regiones", value: this.formatInteger(kpi.regiones) },
-                { icon: "CL", label: "N° Colegios", value: this.formatInteger(kpi.colegios) },
-                { icon: "MI", label: "Monto", value: this.formatMillions(kpi.montoIntervencion) }
+                { icon: "clock", label: "N° Regiones", value: this.formatInteger(kpi.regiones) },
+                { icon: "school", label: "N° Colegios", value: this.formatInteger(kpi.colegios) },
+                { icon: "money", label: "Monto", value: this.formatMillions(kpi.montoIntervencion) }
             ];
         }
 
         return [
-            { icon: "RG", label: "N° Regiones", value: this.formatInteger(kpi.regiones) },
-            { icon: "CL", label: "N° Colegios", value: this.formatInteger(kpi.colegios) },
-            { icon: "MI", label: "Monto de inversion", value: this.formatNumber(kpi.montoIntervencion) },
-            { icon: "EB", label: "Estudiantes beneficiarios", value: this.formatInteger(kpi.beneficiarios) }
+            { icon: "clock", label: "N° Regiones", value: this.formatInteger(kpi.regiones) },
+            { icon: "school", label: "N° Colegios", value: this.formatInteger(kpi.colegios) },
+            { icon: "money", label: "Monto de inversion", value: this.formatNumber(kpi.montoIntervencion) },
+            { icon: "users", label: "Estudiantes beneficiarios", value: this.formatInteger(kpi.beneficiarios) }
         ];
     }
 
@@ -3484,7 +3599,7 @@ export class Visual implements IVisual {
 
         const icon = document.createElement("span");
         icon.className = "unit-kpi-icon";
-        icon.textContent = item.icon;
+        this.appendIconSvg(icon, item.icon);
         cell.appendChild(icon);
 
         const content = document.createElement("div");
@@ -3501,6 +3616,157 @@ export class Visual implements IVisual {
 
         cell.appendChild(content);
         return cell;
+    }
+
+    private appendIconSvg(container: HTMLElement, iconName: string): void {
+        const svgNamespace = "http://www.w3.org/2000/svg";
+        const svg = document.createElementNS(svgNamespace, "svg");
+        svg.setAttribute("viewBox", "0 0 24 24");
+        svg.setAttribute("aria-hidden", "true");
+        svg.setAttribute("focusable", "false");
+
+        this.getIconShapes(iconName).forEach((shape: SvgIconShape) => {
+            const element = document.createElementNS(svgNamespace, shape.tag);
+            Object.entries(shape.attrs).forEach(([key, value]: [string, string]) => element.setAttribute(key, value));
+            svg.appendChild(element);
+        });
+
+        container.replaceChildren(svg);
+    }
+
+    private getIconShapes(iconName: string): SvgIconShape[] {
+        const path = (d: string): SvgIconShape => ({ tag: "path", attrs: { d } });
+        const circle = (cx: string, cy: string, r: string): SvgIconShape => ({ tag: "circle", attrs: { cx, cy, r } });
+        const rect = (x: string, y: string, width: string, height: string, rx: string): SvgIconShape => ({
+            tag: "rect",
+            attrs: { x, y, width, height, rx }
+        });
+
+        const icons: Record<string, SvgIconShape[]> = {
+            bolt: [
+                path("M13 2L4 14h7l-1 8 9-12h-7z")
+            ],
+            briefcase: [
+                rect("5", "7", "14", "12", "2"),
+                path("M9 7V5h6v2"),
+                path("M9 12h6")
+            ],
+            building: [
+                path("M5 21V6l7-3 7 3v15"),
+                path("M8 10h2"),
+                path("M14 10h2"),
+                path("M8 14h2"),
+                path("M14 14h2"),
+                path("M10 21v-4h4v4")
+            ],
+            chair: [
+                path("M7 12h10"),
+                path("M8 12V7a4 4 0 0 1 8 0v5"),
+                path("M6 12v7"),
+                path("M18 12v7"),
+                path("M7 16h10")
+            ],
+            clock: [
+                circle("12", "12", "8"),
+                path("M12 8v5l3 2")
+            ],
+            cube: [
+                path("M12 3l8 4.5v9L12 21l-8-4.5v-9z"),
+                path("M12 12l8-4.5"),
+                path("M12 12L4 7.5"),
+                path("M12 12v9")
+            ],
+            document: [
+                path("M8 4h6l3 3v13H8z"),
+                path("M14 4v4h4"),
+                path("M10 12h5"),
+                path("M10 16h5")
+            ],
+            flask: [
+                path("M9 3h6"),
+                path("M10 3v6l-5 8a3 3 0 0 0 2.6 4h8.8a3 3 0 0 0 2.6-4l-5-8V3"),
+                path("M8 16h8")
+            ],
+            home: [
+                path("M4 11l8-7 8 7"),
+                path("M6 10v10h12V10"),
+                path("M10 20v-6h4v6")
+            ],
+            "map-pin": [
+                path("M12 21s7-5.2 7-11a7 7 0 0 0-14 0c0 5.8 7 11 7 11z"),
+                circle("12", "10", "2.5")
+            ],
+            monitor: [
+                rect("4", "5", "16", "11", "1.5"),
+                path("M9 20h6"),
+                path("M12 16v4"),
+                path("M8 9l2-2"),
+                path("M8 12l5-5")
+            ],
+            money: [
+                circle("12", "12", "8"),
+                path("M14.5 9.5c-.7-.6-1.6-.9-2.6-.8-1.2.1-2.1.8-2.1 1.8 0 1.1 1.1 1.5 2.5 1.8 1.5.4 2.4.8 2.4 1.9 0 1-.9 1.8-2.2 1.9-1.1.1-2.2-.2-3-.9"),
+                path("M12 7v10")
+            ],
+            network: [
+                circle("12", "5", "2"),
+                circle("6", "18", "2"),
+                circle("18", "18", "2"),
+                path("M11.2 7L7 16"),
+                path("M12.8 7L17 16"),
+                path("M8 18h8")
+            ],
+            package: [
+                path("M5 8l7-4 7 4-7 4z"),
+                path("M5 8v8l7 4 7-4V8"),
+                path("M12 12v8")
+            ],
+            percent: [
+                path("M7 17L17 7"),
+                circle("8", "8", "2"),
+                circle("16", "16", "2")
+            ],
+            presentation: [
+                rect("4", "5", "16", "11", "1.5"),
+                path("M8 20l4-4 4 4"),
+                path("M9 12l2-2 2 1 3-4")
+            ],
+            restroom: [
+                circle("8", "5", "1.6"),
+                circle("16", "5", "1.6"),
+                path("M7 8h2l1 5H6z"),
+                path("M15 8h2v10"),
+                path("M15 13h3"),
+                path("M7 13v6"),
+                path("M9 13v6")
+            ],
+            school: [
+                path("M4 20V9l8-5 8 5v11"),
+                path("M8 20v-6h8v6"),
+                path("M9 10h6")
+            ],
+            shield: [
+                path("M12 21s7-3.5 7-10V5l-7-3-7 3v6c0 6.5 7 10 7 10z"),
+                path("M12 7v7"),
+                path("M9.5 10.5h5")
+            ],
+            tools: [
+                path("M14 6l4-4 4 4-4 4z"),
+                path("M2 22l8-8"),
+                path("M16 14l6 6"),
+                path("M18 20l2-2"),
+                path("M3 6l5 5"),
+                path("M5 4l5 5")
+            ],
+            users: [
+                path("M8 19c0-2.2 1.8-4 4-4s4 1.8 4 4"),
+                circle("12", "9", "3"),
+                path("M17 11c1.6.3 3 1.7 3 3.5"),
+                path("M7 11c-1.6.3-3 1.7-3 3.5")
+            ]
+        };
+
+        return icons[iconName] || icons.document;
     }
 
     private appendUgmeGroupCards(card: HTMLElement, grupos: GroupMetricSummary[]): void {
@@ -3555,6 +3821,20 @@ export class Visual implements IVisual {
         title.textContent = titleText;
         section.appendChild(title);
 
+        const header = document.createElement("div");
+        header.className = "ugme-detail-table-header";
+
+        const headerIcon = document.createElement("span");
+        this.appendIconSvg(headerIcon, className === "ugme-section-modulares" ? "cube" : "chair");
+        header.appendChild(headerIcon);
+
+        ["Item", "Cantidad", "Monto"].forEach((text: string) => {
+            const label = document.createElement("strong");
+            label.textContent = text;
+            header.appendChild(label);
+        });
+        section.appendChild(header);
+
         const grid = document.createElement("div");
         grid.className = "ugme-detail-group-grid";
         grupos.forEach((grupo: GroupMetricSummary) => grid.appendChild(this.createUgmeDetailGroupCard(grupo)));
@@ -3565,41 +3845,27 @@ export class Visual implements IVisual {
     private createUgmeDetailGroupCard(grupo: GroupMetricSummary): HTMLElement {
         const card = document.createElement("article");
         const groupClass = this.getUgmeGroupClass(grupo.grupo);
-        card.className = `ugme-detail-group-card ${groupClass}`;
-
-        const header = document.createElement("div");
-        header.className = "ugme-detail-group-header";
+        card.className = `ugme-detail-group-row-card ${groupClass}`;
 
         const icon = document.createElement("span");
-        icon.textContent = this.getUgmeGroupIcon(grupo.grupo);
-        header.appendChild(icon);
+        icon.className = "ugme-detail-item-icon";
+        this.appendIconSvg(icon, this.getUgmeGroupIcon(grupo.grupo));
+        card.appendChild(icon);
 
-        const title = document.createElement("h4");
-        title.textContent = grupo.grupo;
-        header.appendChild(title);
-        card.appendChild(header);
+        const item = document.createElement("strong");
+        item.className = "ugme-detail-item-name";
+        item.textContent = grupo.grupo;
+        card.appendChild(item);
 
-        [
-            ["Cantidad", this.formatInteger(grupo.cantidad), "CA"],
-            ["Beneficiarios", this.formatInteger(grupo.beneficiarios), "BE"],
-            ["Monto", this.formatMillions(grupo.montoIntervencion), "S/"]
-        ].forEach(([labelText, valueText, iconText]: string[]) => {
-            const row = document.createElement("div");
-            row.className = "ugme-detail-group-row";
+        const quantity = document.createElement("strong");
+        quantity.className = "ugme-detail-item-quantity";
+        quantity.textContent = this.formatInteger(grupo.cantidad);
+        card.appendChild(quantity);
 
-            const label = document.createElement("span");
-            label.textContent = iconText;
-            row.appendChild(label);
-
-            const text = document.createElement("small");
-            text.textContent = labelText;
-            row.appendChild(text);
-
-            const value = document.createElement("strong");
-            value.textContent = valueText;
-            row.appendChild(value);
-            card.appendChild(row);
-        });
+        const amount = document.createElement("strong");
+        amount.className = "ugme-detail-item-amount";
+        amount.textContent = this.formatMillions(grupo.montoIntervencion);
+        card.appendChild(amount);
 
         return card;
     }
@@ -3630,18 +3896,18 @@ export class Visual implements IVisual {
 
     private getUgmeGroupIcon(grupo: string): string {
         const icons: Record<string, string> = {
-            "ESCUELA MODULAR": "ED",
-            "AULA MODULAR": "AU",
-            "KIT DE PARARRAYO": "KP",
-            "MODULO SS.HH.": "SS",
-            "REDES COMPLEMENTARIAS": "RC",
-            MOBILIARIO: "MO",
-            EQUIPAMIENTO: "EQ",
-            LABORATORIOS: "LA",
-            TALLERES: "TA"
+            "ESCUELA MODULAR": "building",
+            "AULA MODULAR": "presentation",
+            "KIT DE PARARRAYO": "bolt",
+            "MODULO SS.HH.": "restroom",
+            "REDES COMPLEMENTARIAS": "network",
+            MOBILIARIO: "chair",
+            EQUIPAMIENTO: "monitor",
+            LABORATORIOS: "flask",
+            TALLERES: "tools"
         };
 
-        return icons[grupo] || "ME";
+        return icons[grupo] || "package";
     }
 
     private getUgmeGroupClass(grupo: string): string {
@@ -3680,6 +3946,511 @@ export class Visual implements IVisual {
 
     private removeDetailModal(): void {
         this.target.querySelectorAll(".detail-modal-backdrop").forEach((modal: Element) => modal.remove());
+    }
+
+    private openSchoolListModal(regionFilter: string | null): void {
+        this.isSchoolListModalOpen = true;
+        this.schoolListRegionFilter = regionFilter;
+        this.selectedSchoolKey = null;
+        this.detailSearchText = "";
+        this.detailPage = 1;
+        this.refreshSchoolModals();
+    }
+
+    private closeSchoolListModal(): void {
+        this.isSchoolListModalOpen = false;
+        this.schoolListRegionFilter = null;
+        this.selectedSchoolKey = null;
+        this.detailSearchText = "";
+        this.detailPage = 1;
+        this.removeSchoolModals();
+    }
+
+    private openSchoolInterventionsModal(row: SchoolSummaryRow): void {
+        this.selectedSchoolKey = this.normalizeText(row.codigoLocal);
+        this.selectedSchoolTab = this.getFirstSchoolUnit(row) || "UGRD";
+        this.refreshSchoolModals();
+    }
+
+    private closeSchoolInterventionsModal(): void {
+        this.selectedSchoolKey = null;
+        this.removeSchoolInterventionsModal();
+    }
+
+    private refreshSchoolModals(): void {
+        this.removeSchoolModals();
+        if (this.isSchoolListModalOpen) {
+            this.appendSchoolListModal();
+        }
+
+        if (this.selectedSchoolKey) {
+            this.appendSchoolInterventionsModal(this.selectedSchoolKey);
+        }
+    }
+
+    private removeSchoolModals(): void {
+        this.target.querySelectorAll(".school-list-modal-backdrop").forEach((modal: Element) => modal.remove());
+        this.removeSchoolInterventionsModal();
+    }
+
+    private removeSchoolInterventionsModal(): void {
+        this.target.querySelectorAll(".school-interventions-modal-backdrop").forEach((modal: Element) => modal.remove());
+    }
+
+    private appendSchoolListModal(): void {
+        const backdrop = document.createElement("div");
+        backdrop.className = "detail-modal-backdrop school-list-modal-backdrop";
+        backdrop.onclick = (event: MouseEvent) => {
+            if (event.target === backdrop) {
+                this.closeSchoolListModal();
+            }
+        };
+
+        const modal = document.createElement("section");
+        modal.className = "detail-modal school-list-modal";
+
+        const header = document.createElement("header");
+        header.className = "detail-modal-header school-list-modal-header";
+        const titleGroup = document.createElement("div");
+        const title = document.createElement("h2");
+        title.textContent = this.schoolListRegionFilter
+            ? `Colegios - ${this.schoolListRegionFilter}`
+            : "Colegios";
+        titleGroup.appendChild(title);
+        const subtitle = document.createElement("p");
+        subtitle.textContent = "Seleccione un colegio para revisar sus intervenciones por unidad gerencial.";
+        titleGroup.appendChild(subtitle);
+        header.appendChild(titleGroup);
+
+        const closeIcon = document.createElement("button");
+        closeIcon.className = "detail-modal-close";
+        closeIcon.type = "button";
+        closeIcon.textContent = "X";
+        closeIcon.onclick = () => this.closeSchoolListModal();
+        header.appendChild(closeIcon);
+        modal.appendChild(header);
+
+        const allRows = this.getSchoolSummaryRows();
+        const filteredRows = this.filterSchoolSummaryRows(allRows);
+        const totalPages = Math.max(1, Math.ceil(filteredRows.length / this.detailPageSize));
+        this.detailPage = Math.min(this.detailPage, totalPages);
+        const pageStart = (this.detailPage - 1) * this.detailPageSize;
+        const pageRows = filteredRows.slice(pageStart, pageStart + this.detailPageSize);
+
+        const toolbar = document.createElement("div");
+        toolbar.className = "detail-modal-toolbar";
+
+        const search = document.createElement("input");
+        search.className = "detail-search-input";
+        search.type = "search";
+        search.placeholder = "Buscar por codigo, colegio o ubicacion";
+        search.value = this.detailSearchText;
+        search.oninput = () => {
+            this.detailSearchText = search.value;
+            this.detailPage = 1;
+            this.refreshSchoolModals();
+        };
+        toolbar.appendChild(search);
+
+        const count = document.createElement("span");
+        count.className = "detail-count";
+        count.textContent = `Mostrando ${pageRows.length} de ${filteredRows.length} colegios`;
+        toolbar.appendChild(count);
+        modal.appendChild(toolbar);
+
+        this.appendSchoolListTable(modal, pageRows);
+        this.appendSchoolListPagination(modal, totalPages);
+
+        const footer = document.createElement("footer");
+        footer.className = "detail-modal-footer";
+        const closeButton = document.createElement("button");
+        closeButton.type = "button";
+        closeButton.textContent = "Cerrar";
+        closeButton.onclick = () => this.closeSchoolListModal();
+        footer.appendChild(closeButton);
+        modal.appendChild(footer);
+
+        backdrop.appendChild(modal);
+        this.target.appendChild(backdrop);
+        window.setTimeout(() => search.focus(), 0);
+    }
+
+    private appendSchoolListTable(modal: HTMLElement, rows: SchoolSummaryRow[]): void {
+        const scroller = document.createElement("div");
+        scroller.className = "detail-table-scroller school-list-scroller";
+
+        const table = document.createElement("table");
+        table.className = "detail-table school-list-table";
+        const thead = document.createElement("thead");
+        const headerRow = document.createElement("tr");
+        ["Codigo Local", "Nombre Colegio", "Riesgo", "Region", "Provincia", "Distrito", "Accion"].forEach((label: string) => {
+            const th = document.createElement("th");
+            th.textContent = label;
+            headerRow.appendChild(th);
+        });
+        thead.appendChild(headerRow);
+        table.appendChild(thead);
+
+        const tbody = document.createElement("tbody");
+        if (!rows.length) {
+            const row = document.createElement("tr");
+            const cell = document.createElement("td");
+            cell.colSpan = 7;
+            cell.textContent = "No hay colegios para el contexto seleccionado.";
+            row.appendChild(cell);
+            tbody.appendChild(row);
+        } else {
+            rows.forEach((school: SchoolSummaryRow) => {
+                const row = document.createElement("tr");
+                [
+                    school.codigoLocal,
+                    school.nombreLocal,
+                    school.nivelRiesgo,
+                    school.region,
+                    school.provincia,
+                    school.distrito
+                ].forEach((value: string) => {
+                    const td = document.createElement("td");
+                    td.textContent = value || "-";
+                    row.appendChild(td);
+                });
+
+                const actionCell = document.createElement("td");
+                const action = document.createElement("button");
+                action.className = "school-action-button";
+                action.type = "button";
+                action.textContent = "Ver Intervenciones";
+                action.onclick = () => this.openSchoolInterventionsModal(school);
+                actionCell.appendChild(action);
+                row.appendChild(actionCell);
+                tbody.appendChild(row);
+            });
+        }
+
+        table.appendChild(tbody);
+        scroller.appendChild(table);
+        modal.appendChild(scroller);
+    }
+
+    private appendSchoolListPagination(modal: HTMLElement, totalPages: number): void {
+        const pagination = document.createElement("div");
+        pagination.className = "detail-pagination";
+
+        const previous = document.createElement("button");
+        previous.type = "button";
+        previous.textContent = "Anterior";
+        previous.disabled = this.detailPage <= 1;
+        previous.onclick = () => {
+            this.detailPage = Math.max(1, this.detailPage - 1);
+            this.refreshSchoolModals();
+        };
+        pagination.appendChild(previous);
+
+        const page = document.createElement("span");
+        page.textContent = `Pagina ${this.detailPage} de ${totalPages}`;
+        pagination.appendChild(page);
+
+        const next = document.createElement("button");
+        next.type = "button";
+        next.textContent = "Siguiente";
+        next.disabled = this.detailPage >= totalPages;
+        next.onclick = () => {
+            this.detailPage = Math.min(totalPages, this.detailPage + 1);
+            this.refreshSchoolModals();
+        };
+        pagination.appendChild(next);
+
+        modal.appendChild(pagination);
+    }
+
+    private appendSchoolInterventionsModal(schoolKey: string): void {
+        const school = this.getSchoolSummaryRows().find((row: SchoolSummaryRow) => this.normalizeText(row.codigoLocal) === schoolKey);
+        if (!school) {
+            this.selectedSchoolKey = null;
+            return;
+        }
+
+        const backdrop = document.createElement("div");
+        backdrop.className = "detail-modal-backdrop school-interventions-modal-backdrop";
+        backdrop.onclick = (event: MouseEvent) => {
+            if (event.target === backdrop) {
+                this.closeSchoolInterventionsModal();
+            }
+        };
+
+        const modal = document.createElement("section");
+        modal.className = "detail-modal school-interventions-modal";
+
+        const header = document.createElement("header");
+        header.className = "school-interventions-header";
+        const titleGroup = document.createElement("div");
+        const eyebrow = document.createElement("span");
+        eyebrow.textContent = school.codigoLocal;
+        titleGroup.appendChild(eyebrow);
+        const title = document.createElement("h2");
+        title.textContent = school.nombreLocal;
+        titleGroup.appendChild(title);
+
+        const meta = document.createElement("div");
+        meta.className = "school-interventions-meta";
+        [
+            ["Riesgo", school.nivelRiesgo],
+            ["Region", school.region],
+            ["Provincia", school.provincia],
+            ["Distrito", school.distrito]
+        ].forEach(([label, value]: string[]) => {
+            const item = document.createElement("div");
+            const itemLabel = document.createElement("small");
+            itemLabel.textContent = label;
+            item.appendChild(itemLabel);
+            const itemValue = document.createElement("strong");
+            itemValue.textContent = value || "-";
+            item.appendChild(itemValue);
+            meta.appendChild(item);
+        });
+        titleGroup.appendChild(meta);
+        header.appendChild(titleGroup);
+
+        const closeIcon = document.createElement("button");
+        closeIcon.className = "detail-modal-close";
+        closeIcon.type = "button";
+        closeIcon.textContent = "X";
+        closeIcon.onclick = () => this.closeSchoolInterventionsModal();
+        header.appendChild(closeIcon);
+        modal.appendChild(header);
+
+        const availableUnits = this.getSchoolUnits(schoolKey);
+        if (!availableUnits.includes(this.selectedSchoolTab)) {
+            this.selectedSchoolTab = availableUnits[0] || "UGRD";
+        }
+
+        const tabs = document.createElement("div");
+        tabs.className = "school-unit-tabs";
+        (["UGRD", "UGSC", "UGEO", "UGM", "UGME"] as UnitKpiName[]).forEach((unit: UnitKpiName) => {
+            const button = document.createElement("button");
+            const hasData = availableUnits.includes(unit);
+            button.type = "button";
+            button.className = `school-unit-tab${unit === this.selectedSchoolTab ? " school-unit-tab-active" : ""}`;
+            button.textContent = unit;
+            button.disabled = !hasData;
+            button.onclick = () => {
+                this.selectedSchoolTab = unit;
+                this.refreshSchoolModals();
+            };
+            tabs.appendChild(button);
+        });
+        modal.appendChild(tabs);
+
+        const body = document.createElement("section");
+        body.className = "school-interventions-body";
+        const unitRows = this.getSchoolUnitRows(schoolKey, this.selectedSchoolTab);
+        if (!unitRows.length) {
+            const empty = document.createElement("p");
+            empty.className = "school-interventions-empty";
+            empty.textContent = "No hay intervenciones registradas para esta unidad gerencial.";
+            body.appendChild(empty);
+        } else if (this.selectedSchoolTab === "UGME") {
+            this.appendSchoolUgmeInterventions(body, unitRows);
+        } else {
+            const summary = this.summarizeSchoolUnitRows(this.selectedSchoolTab, unitRows);
+            const card = this.createUnitCard(summary, false);
+            card.classList.add("school-intervention-unit-card");
+            body.appendChild(card);
+        }
+        modal.appendChild(body);
+
+        const footer = document.createElement("footer");
+        footer.className = "detail-modal-footer";
+        const backButton = document.createElement("button");
+        backButton.type = "button";
+        backButton.textContent = "Volver a colegios";
+        backButton.onclick = () => this.closeSchoolInterventionsModal();
+        footer.appendChild(backButton);
+        modal.appendChild(footer);
+
+        backdrop.appendChild(modal);
+        this.target.appendChild(backdrop);
+    }
+
+    private appendSchoolUgmeInterventions(container: HTMLElement, rows: UnitDetailRow[]): void {
+        const summary = this.summarizeSchoolUnitRows("UGME", rows);
+        const hero = document.createElement("section");
+        hero.className = "school-ugme-summary";
+        this.getUnitKpiCells(summary).forEach((item: UnitKpiCell) => hero.appendChild(this.createKpiCell(item)));
+        container.appendChild(hero);
+
+        const sections = document.createElement("div");
+        sections.className = "ugme-detail-sections school-ugme-sections";
+        this.appendUgmeGroupSection(sections, "MODULOS PREFABRICADOS", this.getUgmeModularGroups(summary.grupos), "ugme-section-modulares");
+        this.appendUgmeGroupSection(sections, "MOBILIARIO Y EQUIPAMIENTO", this.getUgmeMobiliarioGroups(summary.grupos), "ugme-section-mobiliario");
+        container.appendChild(sections);
+    }
+
+    private getSchoolSummaryRows(): SchoolSummaryRow[] {
+        const bySchool = new Map<string, SchoolSummaryRow>();
+
+        this.streamingIndexes.detailRowsByUnit.forEach((rows: Map<string, UnitDetailRow>, unit: UnitKpiName) => {
+            rows.forEach((row: UnitDetailRow) => {
+                if (!this.detailRowMatchesInternalFilters(row)) {
+                    return;
+                }
+
+                const key = this.normalizeText(row.codigoLocal);
+                if (!key) {
+                    return;
+                }
+
+                const existing = bySchool.get(key) || {
+                    codigoLocal: row.codigoLocal || "-",
+                    nombreLocal: row.nombreLocal || "-",
+                    nivelRiesgo: row.nivelRiesgo || "-",
+                    region: row.region || "-",
+                    provincia: row.provincia || "-",
+                    distrito: row.distrito || "-",
+                    units: new Set<UnitKpiName>()
+                };
+
+                existing.units.add(unit);
+                if ((!existing.nivelRiesgo || existing.nivelRiesgo === "-") && row.nivelRiesgo) {
+                    existing.nivelRiesgo = row.nivelRiesgo;
+                }
+                bySchool.set(key, existing);
+            });
+        });
+
+        return Array.from(bySchool.values())
+            .sort((left: SchoolSummaryRow, right: SchoolSummaryRow) => {
+                const byRegion = left.region.localeCompare(right.region);
+                if (byRegion) {
+                    return byRegion;
+                }
+
+                const byProvince = left.provincia.localeCompare(right.provincia);
+                if (byProvince) {
+                    return byProvince;
+                }
+
+                return left.codigoLocal.localeCompare(right.codigoLocal);
+            });
+    }
+
+    private filterSchoolSummaryRows(rows: SchoolSummaryRow[]): SchoolSummaryRow[] {
+        const searchText = this.normalizeText(this.detailSearchText);
+        return rows.filter((row: SchoolSummaryRow) => {
+            if (this.schoolListRegionFilter && !this.matchesRegion(row.region, this.schoolListRegionFilter)) {
+                return false;
+            }
+
+            if (!searchText) {
+                return true;
+            }
+
+            return [
+                row.codigoLocal,
+                row.nombreLocal,
+                row.nivelRiesgo,
+                row.region,
+                row.provincia,
+                row.distrito
+            ].some((value: string) => this.normalizeText(value).includes(searchText));
+        });
+    }
+
+    private getFirstSchoolUnit(row: SchoolSummaryRow): UnitKpiName | null {
+        return (["UGRD", "UGSC", "UGEO", "UGM", "UGME"] as UnitKpiName[])
+            .find((unit: UnitKpiName) => row.units.has(unit)) || null;
+    }
+
+    private getSchoolUnits(schoolKey: string): UnitKpiName[] {
+        return (["UGRD", "UGSC", "UGEO", "UGM", "UGME"] as UnitKpiName[])
+            .filter((unit: UnitKpiName) => this.getSchoolUnitRows(schoolKey, unit).length > 0);
+    }
+
+    private getSchoolUnitRows(schoolKey: string, unit: UnitKpiName): UnitDetailRow[] {
+        return Array.from(this.streamingIndexes.detailRowsByUnit.get(unit)?.values() || [])
+            .filter((row: UnitDetailRow) => this.normalizeText(row.codigoLocal) === schoolKey && this.detailRowMatchesInternalFilters(row))
+            .sort((left: UnitDetailRow, right: UnitDetailRow) => (left.grupo || "").localeCompare(right.grupo || ""));
+    }
+
+    private summarizeSchoolUnitRows(unit: UnitKpiName, rows: UnitDetailRow[]): UnitKpiSummary {
+        const solicitudes = new Set<string>();
+        const solicitudesRevision = new Set<string>();
+        const solicitudesCulminadas = new Set<string>();
+        const regiones = new Set<string>();
+        const colegios = new Set<string>();
+        const grupos = new Map<string, GroupMetricSummary>();
+
+        let montoIntervencion = 0;
+        let montoAsignado = 0;
+        let montoTransferencia = 0;
+        let montoRetirado = 0;
+        let beneficiarios = 0;
+        let cantidad = 0;
+
+        rows.forEach((row: UnitDetailRow) => {
+            row.solicitudes.forEach((value: string) => solicitudes.add(value));
+            row.solicitudesRevision.forEach((value: string) => solicitudesRevision.add(value));
+            row.solicitudesCulminadas.forEach((value: string) => solicitudesCulminadas.add(value));
+            regiones.add(this.normalizeText(row.region));
+            colegios.add(this.normalizeText(row.codigoLocal));
+            montoIntervencion += row.montoIntervencion;
+            montoAsignado += row.montoAsignado;
+            montoTransferencia += row.montoTransferencia;
+            montoRetirado += row.montoRetirado;
+            beneficiarios += row.beneficiarios;
+            cantidad += row.cantidad;
+
+            if (unit === "UGME" && row.grupo) {
+                const existing = grupos.get(row.grupo) || {
+                    grupo: row.grupo,
+                    montoIntervencion: 0,
+                    beneficiarios: 0,
+                    cantidad: 0,
+                    colegios: 0,
+                    regiones: 0,
+                    filas: 0
+                };
+                existing.montoIntervencion += row.montoIntervencion;
+                existing.beneficiarios += row.beneficiarios;
+                existing.cantidad += row.cantidad;
+                existing.colegios = 1;
+                existing.regiones = 1;
+                existing.filas += 1;
+                grupos.set(row.grupo, existing);
+            }
+        });
+
+        return {
+            unit,
+            unitKey: unit,
+            unidad: unit,
+            label: unit,
+            filas: rows.length,
+            solicitudes: solicitudes.size,
+            regiones: regiones.size,
+            colegios: colegios.size,
+            montoIntervencion,
+            montoAsignado,
+            montoTransferencia,
+            montoRetirado,
+            beneficiarios,
+            solicitudesRevision: solicitudesRevision.size,
+            solicitudesCulminadas: solicitudesCulminadas.size,
+            colegiosConTransferencia: montoTransferencia > 0 ? 1 : 0,
+            colegiosConRetiro: montoRetirado > 0 ? 1 : 0,
+            grupos: unit === "UGME"
+                ? ugmeGrupoOrder.map((grupo: string) => grupos.get(grupo) || {
+                    grupo,
+                    montoIntervencion: 0,
+                    beneficiarios: 0,
+                    cantidad: 0,
+                    colegios: 0,
+                    regiones: 0,
+                    filas: 0
+                })
+                : [],
+            registros: rows.length
+        };
     }
 
     private appendDetailModal(unit: UnitKpiName): void {
@@ -3865,9 +4636,12 @@ export class Visual implements IVisual {
 
     private filterDetailRows(rows: UnitDetailRow[]): UnitDetailRow[] {
         const searchText = this.normalizeText(this.detailSearchText);
-        const regionRows = this.selectedRegion
-            ? rows.filter((row: UnitDetailRow) => this.isRegionNameSelected(row.region))
+        const internalFilteredRows = this.hasDashboardFilters()
+            ? rows.filter((row: UnitDetailRow) => this.detailRowMatchesInternalFilters(row))
             : rows;
+        const regionRows = this.selectedRegion
+            ? internalFilteredRows.filter((row: UnitDetailRow) => this.isRegionNameSelected(row.region))
+            : internalFilteredRows;
 
         if (!searchText) {
             return regionRows;
@@ -3881,6 +4655,72 @@ export class Visual implements IVisual {
             row.distrito,
             row.grupo || ""
         ].some((value: string) => this.normalizeText(value).includes(searchText)));
+    }
+
+    private detailRowMatchesInternalFilters(row: UnitDetailRow): boolean {
+        const filters = this.internalFilters;
+
+        if (!this.detailRowMatchesSelectedRisk(row)) {
+            return false;
+        }
+
+        if (filters.region && this.normalizeText(row.region) !== this.normalizeText(filters.region)) {
+            return false;
+        }
+
+        if (filters.provincia && this.normalizeText(row.provincia) !== this.normalizeText(filters.provincia)) {
+            return false;
+        }
+
+        if (filters.distrito && this.normalizeText(row.distrito) !== this.normalizeText(filters.distrito)) {
+            return false;
+        }
+
+        if (filters.codigoLocal && this.normalizeText(row.codigoLocal) !== this.normalizeText(filters.codigoLocal)) {
+            return false;
+        }
+
+        if (filters.nombreLocal && this.normalizeText(row.nombreLocal) !== this.normalizeText(filters.nombreLocal)) {
+            return false;
+        }
+
+        return true;
+    }
+
+    private recordMatchesSelectedRisk(record: SourceRecord): boolean {
+        if (!this.hasRiskFilter()) {
+            return true;
+        }
+
+        return this.normalizeRiskLevelForFilter(record.nivelRiesgo) === this.selectedRiskView;
+    }
+
+    private detailRowMatchesSelectedRisk(row: UnitDetailRow): boolean {
+        if (!this.hasRiskFilter()) {
+            return true;
+        }
+
+        return this.normalizeRiskLevelForFilter(row.nivelRiesgo) === this.selectedRiskView;
+    }
+
+    private normalizeRiskLevelForFilter(value: PrimitiveValue): RiskLevel {
+        const normalized = this.normalizeText(value)
+            .replace(/\s+/g, " ")
+            .trim();
+
+        if (normalized === "MUY ALTO" || normalized === "MUYALTO" || (normalized.includes("MUY") && normalized.includes("ALTO"))) {
+            return "Muy Alto";
+        }
+
+        if (normalized === "ALTO" || normalized.includes("ALTO")) {
+            return "Alto";
+        }
+
+        if (normalized === "MEDIO" || normalized.includes("MEDIO")) {
+            return "Medio";
+        }
+
+        return "Bajo";
     }
 
     private getDetailColumns(unit: UnitKpiName): DetailColumn[] {
@@ -3939,20 +4779,6 @@ export class Visual implements IVisual {
         }
     }
 
-    private appendPerformanceMini(diagnostics: TableDiagnostics): void {
-        const performance = document.createElement("div");
-        performance.className = "performance-mini";
-        performance.textContent = `Tiempo total: ${this.formatMs(diagnostics.performanceMetrics.updateTotalMs)}`;
-        this.target.appendChild(performance);
-    }
-
-    private updatePerformanceMini(diagnostics: TableDiagnostics): void {
-        const performance = this.target.querySelector(".performance-mini");
-        if (performance) {
-            performance.textContent = `Tiempo total: ${this.formatMs(diagnostics.performanceMetrics.updateTotalMs)}`;
-        }
-    }
-
     private appendFinalLoadingPanel(diagnostics: TableDiagnostics): void {
         const panel = document.createElement("section");
         panel.className = "unit-summary-view";
@@ -3963,41 +4789,12 @@ export class Visual implements IVisual {
 
         const message = document.createElement("p");
         message.className = "loading-message";
-        message.textContent = `Cargando datos acumulados: ${this.formatInteger(diagnostics.accumulatedFilas)} filas`;
+        message.textContent = diagnostics.accumulatedFilas
+            ? "Preparando vista..."
+            : "Cargando informacion...";
         panel.appendChild(message);
 
         this.target.appendChild(panel);
-    }
-
-    private appendLoadingStatusBadge(diagnostics: TableDiagnostics): void {
-        const badge = document.createElement("div");
-        badge.className = "loading-status-badge";
-        badge.textContent = `Actualizando datos: ${this.formatInteger(diagnostics.accumulatedFilas)} filas`;
-        this.target.appendChild(badge);
-    }
-
-    private appendLoadingPanel(diagnostics: TableDiagnostics): void {
-        const title = document.createElement("h2");
-        title.textContent = "Cargando informacion...";
-        this.target.appendChild(title);
-
-        this.appendKeyValueList([
-            ["Segmentos descargados", diagnostics.fetchCount.toString()],
-            ["Filas acumuladas", diagnostics.accumulatedFilas.toString()],
-            ["Estado", "Procesando..."],
-            ["Mensaje", "Espere un momento."]
-        ]);
-    }
-
-    private appendDataViewPanel(diagnostics: TableDiagnostics): void {
-        this.appendKeyValueList([
-            ["options.dataViews.length", diagnostics.dataViewCount.toString()],
-            ["table DataView", diagnostics.hasTable ? "si" : "no"],
-            ["filas del segmento actual", diagnostics.segmentFilas.toString()],
-            ["filas acumuladas", diagnostics.accumulatedFilas.toString()],
-            ["hay mas datos / segment", diagnostics.hasMoreData ? "si" : "no"],
-            ["dataReduction", diagnostics.dataReductionText]
-        ]);
     }
 
     private appendUnitKpiCards(engine: AnalyticsEngine): void {
@@ -4122,313 +4919,6 @@ export class Visual implements IVisual {
         card.appendChild(table);
     }
 
-    private appendGlobalTotalsPanel(engine: AnalyticsEngine): void {
-        const title = document.createElement("h2");
-        title.textContent = "Totales globales";
-        this.target.appendChild(title);
-
-        const totals = engine.getTotals();
-
-        this.appendKeyValueList([
-            ["filas", totals.filas.toString()],
-            ["colegios unicos", totals.colegiosUnicos.toString()],
-            ["solicitudes unicas", totals.solicitudesUnicas.toString()],
-            ["regiones", totals.regionesUnicas.toString()],
-            ["provincias", totals.provinciasUnicas.toString()],
-            ["distritos", totals.distritosUnicos.toString()],
-            ["unidades gerenciales", totals.unidadesUnicas.toString()],
-            ["monto total", this.formatNumber(totals.montoTotal)],
-            ["% critico global", this.formatPercent(totals.porcentajeCritico)]
-        ]);
-    }
-
-    private appendLazyNavigationDiagnosticsPanel(engine: AnalyticsEngine): void {
-        const title = document.createElement("h2");
-        title.textContent = "Diagnostico de navegacion lazy";
-        this.target.appendChild(title);
-
-        const diagnostics = engine.getLazyNavigationDiagnostics();
-
-        this.appendKeyValueList([
-            ["regiones indexadas", diagnostics.regionesIndexadas.toString()],
-            ["provincias indexadas", diagnostics.provinciasIndexadas.toString()],
-            ["distritos indexados", diagnostics.distritosIndexados.toString()],
-            ["colegios indexados", diagnostics.colegiosIndexados.toString()],
-            ["relaciones provinciasByRegion", diagnostics.relacionesProvinciasByRegion.toString()],
-            ["relaciones distritosByProvincia", diagnostics.relacionesDistritosByProvincia.toString()],
-            ["relaciones colegiosByDistrito", diagnostics.relacionesColegiosByDistrito.toString()],
-            ["primera region", diagnostics.primeraRegion],
-            ["provincias asociadas", diagnostics.provinciasPrimeraRegion.toString()],
-            ["primera provincia", diagnostics.primeraProvincia],
-            ["distritos asociados", diagnostics.distritosPrimeraProvincia.toString()],
-            ["primer distrito", diagnostics.primerDistrito],
-            ["colegios asociados", diagnostics.colegiosPrimerDistrito.toString()],
-            ["nota", diagnostics.notaProvinciaDistrito]
-        ]);
-
-        this.appendDiagnosticRowsTable(
-            "Primeras 5 provincias de la primera region",
-            ["Provincia", "Filas"],
-            diagnostics.primerasProvincias
-        );
-        this.appendDiagnosticRowsTable(
-            "Primeros 5 distritos de la primera provincia",
-            ["Distrito", "Filas"],
-            diagnostics.primerosDistritos
-        );
-        this.appendDiagnosticRowsTable(
-            "Primeros 5 colegios del primer distrito",
-            ["Colegio", "Filas"],
-            diagnostics.primerosColegios
-        );
-    }
-
-    private appendPerformancePanel(diagnostics: TableDiagnostics): void {
-        const title = document.createElement("h2");
-        title.textContent = "Performance";
-        this.target.appendChild(title);
-
-        const metrics = this.getPerformanceDisplayRows(diagnostics);
-        const list = document.createElement("dl");
-        list.className = "metric-list performance-list";
-
-        metrics.forEach(([key, label, value]: string[]) => {
-            const term = document.createElement("dt");
-            term.textContent = label;
-            list.appendChild(term);
-
-            const description = document.createElement("dd");
-            description.dataset.perfKey = key;
-            description.textContent = value;
-            list.appendChild(description);
-        });
-
-        this.target.appendChild(list);
-    }
-
-    private updatePerformancePanel(diagnostics: TableDiagnostics): void {
-        this.getPerformanceDisplayRows(diagnostics).forEach(([key, , value]: string[]) => {
-            const element = this.target.querySelector(`[data-perf-key="${key}"]`);
-            if (element) {
-                element.textContent = value;
-            }
-        });
-    }
-
-    private getPerformanceDisplayRows(diagnostics: TableDiagnostics): string[][] {
-        const metrics = diagnostics.performanceMetrics;
-
-        return [
-            ["updateTotalMs", "Update total", this.formatMs(metrics.updateTotalMs)],
-            ["segmentLoadMs", "Tiempo carga segmentos", this.formatMs(metrics.segmentLoadMs)],
-            ["readDataViewMs", "Read DataView", this.formatMs(metrics.readDataViewMs)],
-            ["findColumnsMs", "Find columns", this.formatMs(metrics.findColumnsMs)],
-            ["buildRecordsMs", "Build records", this.formatMs(metrics.buildRecordsMs)],
-            ["accumulateRowsMs", "Accumulate rows", this.formatMs(metrics.accumulateRowsMs)],
-            ["buildAnalyticsEngineMs", "Build analytics engine", this.formatMs(metrics.buildAnalyticsEngineMs)],
-            ["buildFlatIndexesMs", "Build flat indexes", this.formatMs(metrics.buildFlatIndexesMs)],
-            ["buildRelationIndexesMs", "Build relation indexes", this.formatMs(metrics.buildRelationIndexesMs)],
-            ["lazySampleQueryMs", "Lazy sample query", this.formatMs(metrics.lazySampleQueryMs)],
-            ["renderMs", "Render HTML", this.formatMs(metrics.renderMs)],
-            ["fetchWaitMs", "Fetch wait", metrics.fetchWaitMs === undefined ? "n/a" : this.formatMs(metrics.fetchWaitMs)],
-            ["indexedRegiones", "Regiones indexadas", metrics.indexedRegiones.toString()],
-            ["indexedProvincias", "Provincias indexadas", metrics.indexedProvincias.toString()],
-            ["indexedDistritos", "Distritos indexados", metrics.indexedDistritos.toString()],
-            ["indexedColegios", "Colegios indexados", metrics.indexedColegios.toString()],
-            ["fetchCount", "Segmentos recibidos", metrics.fetchCount.toString()],
-            ["analyticsCacheHit", "Analytics Cache", metrics.analyticsCacheHit ? "SI" : "NO"],
-            ["analyticsRebuilt", "Analytics Rebuilt", metrics.analyticsRebuilt ? "SI" : "NO"],
-            ["datasetSignature", "Dataset Signature", metrics.datasetSignature || "n/a"],
-            ["segmentFilas", "Rows segment", diagnostics.segmentFilas.toString()],
-            ["accumulatedFilas", "Rows accumulated", diagnostics.accumulatedFilas.toString()],
-            ["processingRate", "Rows/second", `${metrics.rowsPerSecond.toFixed(2)} rows/s`],
-            ["msPer10k", "Ms por 10,000 filas", this.formatMs(metrics.msPer10kRows)]
-        ];
-    }
-
-    private appendRegionSummaryTable(engine: AnalyticsEngine): void {
-        const title = document.createElement("h2");
-        title.textContent = "Resumen por region";
-        this.target.appendChild(title);
-
-        const table = this.createTable([
-            "Region",
-            "Filas",
-            "Colegios unicos",
-            "Solicitudes unicas",
-            "Monto total",
-            "Bajo",
-            "Medio",
-            "Alto",
-            "Muy Alto",
-            "% critico"
-        ]);
-        const tbody = document.createElement("tbody");
-        const summaries = engine.getRegions();
-
-        summaries.forEach((summary: BucketSummary) => {
-            this.appendTableRow(tbody, [
-                summary.label,
-                summary.filas.toString(),
-                summary.colegiosUnicos.toString(),
-                summary.solicitudesUnicas.toString(),
-                this.formatNumber(summary.montoTotal),
-                summary.riesgo.bajo.toString(),
-                summary.riesgo.medio.toString(),
-                summary.riesgo.alto.toString(),
-                summary.riesgo.muyAlto.toString(),
-                this.formatPercent(summary.porcentajeCritico)
-            ]);
-        });
-
-        const totals = engine.getTotals();
-        this.appendTableRow(tbody, [
-            "TOTAL",
-            totals.filas.toString(),
-            totals.colegiosUnicos.toString(),
-            totals.solicitudesUnicas.toString(),
-            this.formatNumber(totals.montoTotal),
-            totals.riesgo.bajo.toString(),
-            totals.riesgo.medio.toString(),
-            totals.riesgo.alto.toString(),
-            totals.riesgo.muyAlto.toString(),
-            this.formatPercent(totals.porcentajeCritico)
-        ], "summary-total-row");
-
-        table.appendChild(tbody);
-        this.target.appendChild(table);
-    }
-
-    private appendUnitSummaryTable(engine: AnalyticsEngine): void {
-        const title = document.createElement("h2");
-        title.textContent = "Por unidad gerencial";
-        this.target.appendChild(title);
-
-        const table = this.createTable([
-            "Unidad",
-            "Filas",
-            "Colegios unicos",
-            "Solicitudes unicas",
-            "Monto total",
-            "% critico"
-        ]);
-        const tbody = document.createElement("tbody");
-
-        engine.getUnidades().forEach((summary: BucketSummary) => {
-            this.appendTableRow(tbody, [
-                summary.label,
-                summary.filas.toString(),
-                summary.colegiosUnicos.toString(),
-                summary.solicitudesUnicas.toString(),
-                this.formatNumber(summary.montoTotal),
-                this.formatPercent(summary.porcentajeCritico)
-            ]);
-        });
-
-        table.appendChild(tbody);
-        this.target.appendChild(table);
-    }
-
-    private appendStateSummaryTable(engine: AnalyticsEngine): void {
-        const title = document.createElement("h2");
-        title.textContent = "Por estado";
-        this.target.appendChild(title);
-
-        const table = this.createTable(["Estado", "Filas", "Colegios unicos", "Solicitudes unicas", "Monto total"]);
-        const tbody = document.createElement("tbody");
-
-        engine.getEstados().forEach((summary: BucketSummary) => {
-            this.appendTableRow(tbody, [
-                summary.label,
-                summary.filas.toString(),
-                summary.colegiosUnicos.toString(),
-                summary.solicitudesUnicas.toString(),
-                this.formatNumber(summary.montoTotal)
-            ]);
-        });
-
-        table.appendChild(tbody);
-        this.target.appendChild(table);
-    }
-
-    private appendRiskSummaryTable(engine: AnalyticsEngine): void {
-        const title = document.createElement("h2");
-        title.textContent = "Por nivel de riesgo";
-        this.target.appendChild(title);
-
-        const table = this.createTable(["Nivel", "Filas", "Colegios unicos", "Solicitudes unicas", "Monto total", "% sobre total de colegios"]);
-        const tbody = document.createElement("tbody");
-
-        engine.getRiesgos().forEach((summary: RiskLevelSummary) => {
-            this.appendTableRow(tbody, [
-                summary.label,
-                summary.filas.toString(),
-                summary.colegiosUnicos.toString(),
-                summary.solicitudesUnicas.toString(),
-                this.formatNumber(summary.montoTotal),
-                this.formatPercent(summary.porcentajeSobreTotal)
-            ]);
-        });
-
-        table.appendChild(tbody);
-        this.target.appendChild(table);
-    }
-
-    private appendColumnsTable(columns: DataViewMetadataColumn[]): void {
-        const title = document.createElement("h2");
-        title.textContent = "Columnas";
-        this.target.appendChild(title);
-
-        const table = this.createTable(["Index", "Column", "Roles"]);
-        const tbody = document.createElement("tbody");
-
-        columns.forEach((column: DataViewMetadataColumn, index: number) => {
-            this.appendTableRow(tbody, [
-                index.toString(),
-                column.displayName || "(sin nombre)",
-                JSON.stringify(column.roles || {})
-            ]);
-        });
-
-        table.appendChild(tbody);
-        this.target.appendChild(table);
-    }
-
-    private appendDiagnosticRowsTable(titleText: string, headers: string[], rows: string[][]): void {
-        const title = document.createElement("h3");
-        title.textContent = titleText;
-        this.target.appendChild(title);
-
-        const table = this.createTable(headers);
-        const tbody = document.createElement("tbody");
-
-        if (!rows.length) {
-            this.appendTableRow(tbody, ["(sin datos)", "0"]);
-        } else {
-            rows.forEach((row: string[]) => this.appendTableRow(tbody, row));
-        }
-
-        table.appendChild(tbody);
-        this.target.appendChild(table);
-    }
-
-    private appendKeyValueList(metrics: string[][]): void {
-        const list = document.createElement("dl");
-        list.className = "metric-list";
-
-        metrics.forEach(([label, value]: string[]) => {
-            const term = document.createElement("dt");
-            term.textContent = label;
-            list.appendChild(term);
-
-            const description = document.createElement("dd");
-            description.textContent = value;
-            list.appendChild(description);
-        });
-
-        this.target.appendChild(list);
-    }
-
     private createTable(headers: string[]): HTMLTableElement {
         const table = document.createElement("table");
         const thead = document.createElement("thead");
@@ -4465,19 +4955,6 @@ export class Visual implements IVisual {
         const paragraph = document.createElement("p");
         paragraph.textContent = message;
         this.target.appendChild(paragraph);
-    }
-
-    private logDataFlow(label: string, details: Record<string, unknown>): void {
-        if (!this.enableRuntimeLogs) {
-            return;
-        }
-
-        // Runtime-only diagnostics for Power BI Desktop filtering/segment behavior.
-        console.group(`DataView flow #${this.updateCount}: ${label}`);
-        Object.entries(details).forEach(([key, value]: [string, unknown]) => {
-            console.log(key, value);
-        });
-        console.groupEnd();
     }
 
     private getCachedAnalytics(datasetSignature: string): AnalyticsEngine | null {
@@ -4721,6 +5198,16 @@ export class Visual implements IVisual {
         return this.displayValue(row[index]).trim();
     }
 
+    private internDimensionString(value: string): string {
+        const cached = this.dimensionStringPool.get(value);
+        if (cached !== undefined) {
+            return cached;
+        }
+
+        this.dimensionStringPool.set(value, value);
+        return value;
+    }
+
     private valueKey(value: PrimitiveValue): string {
         if (value instanceof Date) {
             return `date:${value.toISOString()}`;
@@ -4751,11 +5238,10 @@ export class Visual implements IVisual {
 
     private formatMillions(value: number): string {
         const millions = value / 1_000_000;
-        const fractionDigits = Math.abs(millions) < 100 ? 1 : 0;
 
-        return `S/ ${millions.toLocaleString(undefined, {
-            maximumFractionDigits: fractionDigits,
-            minimumFractionDigits: fractionDigits
+        return `S/ ${millions.toLocaleString("es-PE", {
+            maximumFractionDigits: 0,
+            minimumFractionDigits: 0
         })} M`;
     }
 
@@ -4782,14 +5268,6 @@ export class Visual implements IVisual {
         }
 
         return `${(value * 100).toFixed(2)}%`;
-    }
-
-    private formatMs(value: number): string {
-        if (!Number.isFinite(value)) {
-            return "n/a";
-        }
-
-        return `${value.toFixed(2)} ms`;
     }
 
     private calculateProcessingRate(rowCount: number, updateTotalMs: number): number {

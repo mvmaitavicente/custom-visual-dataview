@@ -993,11 +993,35 @@ svg.leaflet-image-layer.leaflet-interactive path {
 .data-view-diagnostic .unit-summary-view h1,
 .data-view-diagnostic .units-panel h1 {
   color: #111827;
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 800;
   line-height: 1.15;
-  margin: 0 0 14px;
+  margin: 0;
   text-transform: uppercase;
+}
+.data-view-diagnostic .units-panel-header {
+  align-items: center;
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  min-height: 34px;
+}
+.data-view-diagnostic .units-detail-button {
+  background: #0f172a;
+  border: 0;
+  border-radius: 8px;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.16);
+  color: #ffffff;
+  cursor: pointer;
+  flex: 0 0 auto;
+  font-size: 13px;
+  font-weight: 900;
+  padding: 9px 14px;
+  white-space: nowrap;
+}
+.data-view-diagnostic .units-detail-button:hover {
+  background: #1e293b;
 }
 .data-view-diagnostic .map-title {
   color: #0f172a;
@@ -1089,12 +1113,12 @@ svg.leaflet-image-layer.leaflet-interactive path {
   border: 1px solid #cbd5e1;
   border-radius: 8px;
   box-shadow: 0 12px 26px rgba(15, 23, 42, 0.16);
-  max-height: 220px;
-  padding: 9px;
+  max-height: 248px;
+  padding: 10px;
   position: absolute;
   right: 12px;
   top: 12px;
-  width: 184px;
+  width: 204px;
   z-index: 12;
 }
 .data-view-diagnostic .map-ranking-header {
@@ -1106,7 +1130,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 }
 .data-view-diagnostic .map-ranking-header strong {
   color: #0f172a;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 900;
   line-height: 1;
 }
@@ -1114,7 +1138,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
   border: 1px solid #cbd5e1;
   border-radius: 6px;
   color: #0f172a;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 800;
   height: 26px;
   padding: 2px 4px;
@@ -1124,16 +1148,16 @@ svg.leaflet-image-layer.leaflet-interactive path {
 .data-view-diagnostic .map-ranking-card > small {
   color: #64748b;
   display: block;
-  font-size: 10.5px;
+  font-size: 11.5px;
   font-weight: 800;
   margin-bottom: 6px;
 }
 .data-view-diagnostic .map-ranking-list {
   display: grid;
-  gap: 4px;
+  gap: 5px;
   list-style: none;
   margin: 0;
-  max-height: 156px;
+  max-height: 176px;
   overflow: auto;
   padding: 0;
 }
@@ -1153,7 +1177,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 }
 .data-view-diagnostic .map-ranking-list b {
   color: #0f172a;
-  font-size: 10.5px;
+  font-size: 12px;
   font-weight: 800;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1161,7 +1185,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 }
 .data-view-diagnostic .map-ranking-list em {
   color: #334155;
-  font-size: 10.5px;
+  font-size: 12px;
   font-style: normal;
   font-weight: 800;
   white-space: nowrap;
@@ -1195,11 +1219,11 @@ svg.leaflet-image-layer.leaflet-interactive path {
   border-top: 1px solid #dbeafe;
   bottom: 0;
   display: flex;
-  gap: 6px;
+  gap: 9px;
   left: 0;
-  min-height: 38px;
+  min-height: 52px;
   overflow-x: auto;
-  padding: 6px 8px;
+  padding: 8px 10px;
   position: absolute;
   right: 0;
   z-index: 710;
@@ -1207,19 +1231,20 @@ svg.leaflet-image-layer.leaflet-interactive path {
 .data-view-diagnostic .map-risk-toggle span {
   color: #0f172a;
   flex: 0 0 auto;
-  font-size: 11px;
-  font-weight: 800;
+  font-size: 13px;
+  font-weight: 900;
 }
 .data-view-diagnostic .map-risk-toggle-button {
   background: #ffffff;
   border: 1px solid #cbd5e1;
-  border-radius: 6px;
+  border-radius: 8px;
   color: #0f172a;
   cursor: pointer;
   flex: 0 0 auto;
-  font-size: 11px;
-  font-weight: 800;
-  padding: 5px 9px;
+  font-size: 13px;
+  font-weight: 900;
+  min-height: 34px;
+  padding: 8px 14px;
 }
 .data-view-diagnostic .map-risk-toggle-button-active {
   background: #2563eb;
@@ -1374,69 +1399,70 @@ svg.leaflet-image-layer.leaflet-interactive path {
 .data-view-diagnostic .unit-grid {
   display: grid;
   flex: 1 1 auto;
-  gap: 12px;
+  gap: 10px;
   grid-template-columns: repeat(2, minmax(230px, 1fr));
   grid-template-rows: repeat(2, minmax(0, 1fr));
   min-height: 0;
-  padding-bottom: 48px;
+  padding-bottom: 38px;
 }
 .data-view-diagnostic .unit-card {
-  background: var(--unit-bg);
-  border: 1px solid color-mix(in srgb, var(--unit-color) 28%, #ffffff);
+  background: linear-gradient(135deg, var(--unit-bg) 0%, #ffffff 58%);
+  border: 1px solid color-mix(in srgb, var(--unit-color) 24%, #dbeafe);
   border-radius: 8px;
-  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.05);
   display: flex;
   flex-direction: column;
   min-width: 0;
   overflow: hidden;
-  padding: 14px;
+  padding: 10px;
   position: relative;
 }
 .data-view-diagnostic .unit-card::before {
-  background: var(--unit-color);
-  content: "";
-  display: block;
-  height: 4px;
-  left: 0;
-  position: absolute;
-  right: 0;
-  top: 0;
+  display: none;
 }
 .data-view-diagnostic .unit-card-header {
   align-items: center;
   display: grid;
-  gap: 12px;
-  grid-template-columns: 40px minmax(0, 1fr) auto;
-  margin-bottom: 14px;
-  min-height: 44px;
+  gap: 10px;
+  grid-template-columns: 46px minmax(0, 1fr);
+  margin-bottom: 11px;
+  min-height: 46px;
 }
 .data-view-diagnostic .unit-card-icon {
   align-items: center;
   background: var(--unit-color);
   border-radius: 8px;
+  box-shadow: 0 10px 20px color-mix(in srgb, var(--unit-color) 24%, transparent);
   color: #ffffff;
   display: flex;
-  font-size: 14px;
-  font-weight: 900;
-  height: 40px;
+  height: 46px;
   justify-content: center;
-  width: 40px;
+  width: 46px;
+}
+.data-view-diagnostic .unit-card-icon svg {
+  fill: none;
+  height: 25px;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.3;
+  width: 25px;
 }
 .data-view-diagnostic .unit-card-title-group {
   min-width: 0;
 }
 .data-view-diagnostic .unit-card-title {
-  color: #0f172a;
-  font-size: 20px;
+  color: #172554;
+  font-size: 24px;
   font-weight: 900;
   line-height: 1;
-  margin: 0 0 4px;
+  margin: 0 0 3px;
 }
 .data-view-diagnostic .unit-card-subtitle {
-  color: #475569;
-  font-size: 15.5px;
+  color: #0f172a;
+  font-size: 12.5px;
   font-weight: 800;
-  line-height: 1.25;
+  line-height: 1.12;
   overflow-wrap: anywhere;
 }
 .data-view-diagnostic .unit-card-detail-link {
@@ -1444,55 +1470,76 @@ svg.leaflet-image-layer.leaflet-interactive path {
   border: 0;
   color: var(--unit-color);
   cursor: pointer;
-  font-size: 12px;
-  font-weight: 800;
-  padding: 4px 0;
+  font-size: 10px;
+  font-weight: 900;
+  padding: 2px 0;
   white-space: nowrap;
 }
 .data-view-diagnostic .unit-kpi-grid {
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid #e2e8f0;
+  border-radius: 7px;
   display: grid;
   flex: 1 1 auto;
-  gap: 9px;
+  gap: 0;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-content: start;
+  grid-auto-rows: minmax(78px, 1fr);
+  overflow: hidden;
 }
 .data-view-diagnostic .unit-kpi-cell {
   align-items: center;
-  background: rgba(255, 255, 255, 0.82);
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.5);
+  border-bottom: 1px solid #e2e8f0;
+  border-right: 1px solid #e2e8f0;
+  border-radius: 0;
   display: grid;
-  gap: 8px;
-  grid-template-columns: 32px minmax(0, 1fr);
-  min-height: 68px;
+  gap: 11px;
+  grid-template-columns: 38px minmax(0, 1fr);
+  min-height: 78px;
   min-width: 0;
-  padding: 9px;
+  padding: 11px 12px;
+}
+.data-view-diagnostic .unit-kpi-cell:nth-child(2n) {
+  border-right: 0;
+}
+.data-view-diagnostic .unit-kpi-cell:nth-last-child(-n + 2) {
+  border-bottom: 0;
+}
+.data-view-diagnostic .unit-card-ugsc .unit-kpi-cell:nth-child(6) {
+  border-bottom: 1px solid #e2e8f0;
 }
 .data-view-diagnostic .unit-kpi-icon {
   align-items: center;
-  background: color-mix(in srgb, var(--unit-color) 16%, #ffffff);
-  border-radius: 7px;
+  background: color-mix(in srgb, var(--unit-color) 15%, #ffffff);
+  border-radius: 999px;
   color: var(--unit-color);
   display: flex;
-  font-size: 11px;
-  font-weight: 900;
-  height: 32px;
+  height: 36px;
   justify-content: center;
-  width: 32px;
+  width: 36px;
+}
+.data-view-diagnostic .unit-kpi-icon svg {
+  fill: none;
+  height: 18px;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.2;
+  width: 18px;
 }
 .data-view-diagnostic .unit-kpi-value {
-  color: #111827;
-  font-size: 17px;
+  color: #172554;
+  font-size: 21px;
   font-weight: 900;
   line-height: 1.1;
   overflow-wrap: anywhere;
 }
 .data-view-diagnostic .unit-kpi-label {
-  color: #64748b;
-  font-size: 15px;
+  color: #0f172a;
+  font-size: 12px;
   font-weight: 900;
-  line-height: 1.2;
-  margin-top: 3px;
+  line-height: 1.05;
+  margin-top: 2px;
   overflow-wrap: anywhere;
 }
 .data-view-diagnostic .floating-next-button {
@@ -1535,169 +1582,203 @@ svg.leaflet-image-layer.leaflet-interactive path {
   min-height: auto;
 }
 .data-view-diagnostic .ugme-detail-card {
-  background: transparent;
-  border: 0;
+  background: #ffffff;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
   display: flex;
   flex-direction: column;
   gap: 12px;
   min-height: 0;
   overflow: auto;
+  padding: 12px;
 }
 .data-view-diagnostic .ugme-hero,
 .data-view-diagnostic .ugme-detail-section {
-  background: linear-gradient(135deg, #f8fdff 0%, #eefaff 100%);
-  border: 1px solid #bae6fd;
+  background: linear-gradient(135deg, #ffffff 0%, #f8fbff 100%);
+  border: 1px solid #d7e4f5;
   border-radius: 8px;
-  box-shadow: 0 10px 24px rgba(8, 145, 178, 0.08);
-  padding: 14px;
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.04);
+  padding: 14px 16px;
 }
 .data-view-diagnostic .ugme-hero-header {
   align-items: center;
   display: grid;
-  gap: 14px;
-  grid-template-columns: 56px minmax(0, 1fr);
+  gap: 16px;
+  grid-template-columns: 58px minmax(0, 1fr);
   margin-bottom: 14px;
 }
 .data-view-diagnostic .ugme-hero-icon {
   align-items: center;
-  background: linear-gradient(135deg, #0891b2, #38bdf8);
+  background: linear-gradient(135deg, #1d4ed8, #60a5fa);
   border-radius: 8px;
+  box-shadow: 0 14px 24px rgba(37, 99, 235, 0.18);
   color: #ffffff;
   display: flex;
-  font-size: 22px;
+  font-size: 21px;
   font-weight: 900;
-  height: 56px;
+  height: 58px;
   justify-content: center;
-  width: 56px;
+  width: 58px;
 }
 .data-view-diagnostic .ugme-hero-header h2 {
-  color: #0f172a;
-  font-size: 28px;
+  color: #020617;
+  font-size: 31px;
   font-weight: 900;
   line-height: 1;
-  margin: 0 0 6px;
+  margin: 0 0 7px;
 }
 .data-view-diagnostic .ugme-hero-header p {
-  color: #334155;
-  font-size: 17px;
+  color: #0f172a;
+  font-size: 18px;
   font-weight: 800;
   line-height: 1.2;
 }
 .data-view-diagnostic .ugme-hero-kpis {
   display: grid;
-  gap: 10px;
+  gap: 16px;
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 .data-view-diagnostic .ugme-hero-kpi {
   align-items: center;
-  background: rgba(255, 255, 255, 0.92);
-  border: 1px solid #cbd5e1;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid #d3dfed;
   border-radius: 8px;
   display: grid;
-  gap: 14px;
-  grid-template-columns: 48px minmax(0, 1fr);
-  min-height: 86px;
-  padding: 14px;
+  gap: 18px;
+  grid-template-columns: 72px minmax(0, 1fr);
+  min-height: 104px;
+  padding: 16px 20px;
 }
 .data-view-diagnostic .ugme-hero-kpi span {
   align-items: center;
-  background: #e0f2fe;
-  border-radius: 8px;
-  color: #0e7490;
+  background: #eff6ff;
+  border: 2px solid #2b6cb0;
+  border-radius: 999px;
+  color: #2b6cb0;
   display: flex;
-  font-size: 18px;
-  font-weight: 900;
-  height: 48px;
+  height: 62px;
   justify-content: center;
-  width: 48px;
+  width: 62px;
+}
+.data-view-diagnostic .ugme-hero-kpi span svg {
+  fill: none;
+  height: 38px;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+  width: 38px;
 }
 .data-view-diagnostic .ugme-hero-kpi strong {
-  color: #0f172a;
+  color: #020617;
   display: block;
-  font-size: 24px;
+  font-size: 33px;
   font-weight: 900;
   line-height: 1;
   overflow-wrap: anywhere;
 }
 .data-view-diagnostic .ugme-hero-kpi small {
-  color: #475569;
+  color: #0f172a;
   display: block;
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 900;
-  margin-top: 5px;
+  margin-top: 7px;
+}
+.data-view-diagnostic .ugme-detail-sections {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 .data-view-diagnostic .ugme-detail-section h3 {
-  background: linear-gradient(135deg, #0e7490, #0891b2);
-  border-radius: 6px;
-  color: #ffffff;
-  display: inline-flex;
-  font-size: 17px;
+  border-bottom: 1px solid #d7e4f5;
+  color: #08234a;
+  display: block;
+  font-size: 24px;
   font-weight: 900;
   letter-spacing: 0;
-  line-height: 1;
-  margin: 0 0 12px;
-  padding: 8px 14px;
+  line-height: 1.1;
+  margin: 0 0 10px;
+  padding: 0 0 14px;
+}
+.data-view-diagnostic .ugme-detail-table-header,
+.data-view-diagnostic .ugme-detail-group-row-card {
+  align-items: center;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 50px minmax(0, 1fr) 110px 118px;
+}
+.data-view-diagnostic .ugme-detail-table-header {
+  border-bottom: 1px solid #d7e4f5;
+  min-height: 52px;
+  padding: 0 4px 8px;
+}
+.data-view-diagnostic .ugme-detail-table-header span {
+  align-items: center;
+  color: #0b4f84;
+  display: flex;
+  height: 34px;
+  justify-content: center;
+  width: 34px;
+}
+.data-view-diagnostic .ugme-detail-table-header span svg {
+  fill: none;
+  height: 31px;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.2;
+  width: 31px;
+}
+.data-view-diagnostic .ugme-detail-table-header strong {
+  color: #0b1f44;
+  font-size: 17px;
+  font-weight: 900;
+}
+.data-view-diagnostic .ugme-detail-table-header strong:nth-child(3),
+.data-view-diagnostic .ugme-detail-table-header strong:nth-child(4) {
+  text-align: right;
 }
 .data-view-diagnostic .ugme-detail-group-grid {
   display: grid;
-  gap: 10px;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 0;
+  grid-template-columns: 1fr;
 }
-.data-view-diagnostic .ugme-detail-group-card {
+.data-view-diagnostic .ugme-detail-group-row-card {
   --group-color: #0e7490;
-  background: rgba(255, 255, 255, 0.92);
-  border: 1px solid color-mix(in srgb, var(--group-color) 40%, #ffffff);
-  border-radius: 8px;
-  padding: 12px;
+  border-bottom: 1px dashed #d7e4f5;
+  min-height: 68px;
+  padding: 9px 4px;
 }
-.data-view-diagnostic .ugme-detail-group-header {
-  align-items: center;
-  display: grid;
-  gap: 10px;
-  grid-template-columns: 44px minmax(0, 1fr);
-  margin-bottom: 12px;
+.data-view-diagnostic .ugme-detail-group-row-card:last-child {
+  border-bottom: 0;
 }
-.data-view-diagnostic .ugme-detail-group-header span {
+.data-view-diagnostic .ugme-detail-item-icon {
   align-items: center;
-  background: color-mix(in srgb, var(--group-color) 15%, #ffffff);
-  border-radius: 999px;
-  color: var(--group-color);
+  color: #0b4f84;
   display: flex;
-  font-size: 13px;
-  font-weight: 900;
-  height: 44px;
+  height: 38px;
   justify-content: center;
-  width: 44px;
+  width: 38px;
 }
-.data-view-diagnostic .ugme-detail-group-header h4 {
-  color: var(--group-color);
-  font-size: 14px;
-  font-weight: 900;
-  line-height: 1.15;
-  margin: 0;
-  text-transform: uppercase;
+.data-view-diagnostic .ugme-detail-item-icon svg {
+  fill: none;
+  height: 32px;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.15;
+  width: 32px;
 }
-.data-view-diagnostic .ugme-detail-group-row {
-  align-items: center;
-  border-top: 1px dashed #cbd5e1;
-  display: grid;
-  gap: 8px;
-  grid-template-columns: 22px minmax(0, 1fr) auto;
-  min-height: 34px;
+.data-view-diagnostic .ugme-detail-item-name {
+  color: #111827;
+  font-size: 17px;
+  font-weight: 800;
+  line-height: 1.2;
 }
-.data-view-diagnostic .ugme-detail-group-row span {
-  color: var(--group-color);
-  font-size: 10px;
-  font-weight: 900;
-}
-.data-view-diagnostic .ugme-detail-group-row small {
-  color: #475569;
-  font-size: 12px;
-  font-weight: 700;
-}
-.data-view-diagnostic .ugme-detail-group-row strong {
-  color: #0f172a;
-  font-size: 15px;
+.data-view-diagnostic .ugme-detail-item-quantity,
+.data-view-diagnostic .ugme-detail-item-amount {
+  color: #111827;
+  font-size: 17px;
   font-weight: 900;
   text-align: right;
   white-space: nowrap;
@@ -1766,29 +1847,6 @@ svg.leaflet-image-layer.leaflet-interactive path {
   font-size: 12px;
   font-weight: 800;
   text-align: right;
-}
-.data-view-diagnostic .performance-mini {
-  bottom: 6px;
-  color: #64748b;
-  font-size: 11px;
-  position: absolute;
-  right: 14px;
-  z-index: 4;
-}
-.data-view-diagnostic .loading-status-badge {
-  background: rgba(15, 23, 42, 0.9);
-  border: 1px solid rgba(148, 163, 184, 0.5);
-  border-radius: 7px;
-  bottom: 12px;
-  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.22);
-  color: #ffffff;
-  font-size: 11px;
-  font-weight: 800;
-  left: 50%;
-  padding: 7px 10px;
-  position: absolute;
-  transform: translateX(-50%);
-  z-index: 780;
 }
 .data-view-diagnostic .detail-modal-backdrop {
   align-items: center;
@@ -1938,6 +1996,161 @@ svg.leaflet-image-layer.leaflet-interactive path {
   background: #cbd5e1;
   cursor: default;
 }
+.data-view-diagnostic .school-list-modal {
+  width: min(98%, 1360px);
+}
+.data-view-diagnostic .school-interventions-modal {
+  max-width: 1480px;
+  width: min(98%, 1480px);
+}
+.data-view-diagnostic .school-list-modal-header h2,
+.data-view-diagnostic .school-interventions-header h2 {
+  font-size: 24px;
+  font-weight: 900;
+}
+.data-view-diagnostic .school-list-modal-header p {
+  font-size: 13px;
+}
+.data-view-diagnostic .school-list-scroller {
+  min-height: 360px;
+}
+.data-view-diagnostic .school-list-table {
+  min-width: 1180px;
+}
+.data-view-diagnostic .school-list-table th,
+.data-view-diagnostic .school-list-table td {
+  font-size: 13px;
+  padding: 11px 12px;
+}
+.data-view-diagnostic .school-list-table th {
+  font-size: 12px;
+}
+.data-view-diagnostic .school-action-button {
+  background: #2563eb;
+  border: 0;
+  border-radius: 8px;
+  color: #ffffff;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 900;
+  padding: 8px 10px;
+  white-space: nowrap;
+}
+.data-view-diagnostic .school-action-button:hover {
+  background: #1d4ed8;
+}
+.data-view-diagnostic .school-interventions-header {
+  align-items: start;
+  border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  gap: 18px;
+  justify-content: space-between;
+  padding: 18px 20px 14px;
+}
+.data-view-diagnostic .school-interventions-header span {
+  color: #2563eb;
+  display: block;
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 0;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+}
+.data-view-diagnostic .school-interventions-header h2 {
+  color: #0f172a;
+  line-height: 1.12;
+  margin: 0 0 12px;
+}
+.data-view-diagnostic .school-interventions-meta {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  max-width: 900px;
+}
+.data-view-diagnostic .school-interventions-meta div {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.data-view-diagnostic .school-interventions-meta small {
+  color: #64748b;
+  display: block;
+  font-size: 10.5px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+.data-view-diagnostic .school-interventions-meta strong {
+  color: #0f172a;
+  display: block;
+  font-size: 13px;
+  font-weight: 900;
+  margin-top: 2px;
+}
+.data-view-diagnostic .school-unit-tabs {
+  align-items: center;
+  border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  gap: 8px;
+  padding: 12px 20px;
+}
+.data-view-diagnostic .school-unit-tab {
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  color: #334155;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 900;
+  padding: 8px 16px;
+}
+.data-view-diagnostic .school-unit-tab-active {
+  background: #0f172a;
+  border-color: #0f172a;
+  color: #ffffff;
+}
+.data-view-diagnostic .school-unit-tab:disabled {
+  color: #94a3b8;
+  cursor: default;
+  opacity: 0.55;
+}
+.data-view-diagnostic .school-interventions-body {
+  background: #f8fafc;
+  flex: 1 1 auto;
+  min-height: 360px;
+  overflow: auto;
+  padding: 18px 20px;
+}
+.data-view-diagnostic .school-intervention-unit-card {
+  min-height: 360px;
+}
+.data-view-diagnostic .school-interventions-empty {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  color: #475569;
+  font-size: 14px;
+  font-weight: 700;
+  margin: 0;
+  padding: 16px;
+}
+.data-view-diagnostic .school-ugme-summary {
+  background: #ffffff;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-bottom: 16px;
+  padding: 14px;
+}
+.data-view-diagnostic .school-ugme-summary .unit-kpi-cell {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+.data-view-diagnostic .school-ugme-sections {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
 .data-view-diagnostic .loading-message {
   background: #ffffff;
   border: 1px solid #e2e8f0;
@@ -1945,12 +2158,6 @@ svg.leaflet-image-layer.leaflet-interactive path {
   color: #475569;
   font-size: 12px;
   padding: 12px;
-}
-.data-view-diagnostic .metric-list {
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  margin: 0 0 12px;
-  row-gap: 4px;
 }
 .data-view-diagnostic dt {
   font-weight: 600;
