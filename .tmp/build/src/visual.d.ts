@@ -107,6 +107,7 @@ export declare class Visual implements IVisual {
     private getInternalFilterCacheKey;
     private appendPeruRiskMap;
     private renderLeafletPeruMap;
+    private getMapFitBoundsOptions;
     private getAutoFocusedRegion;
     private resetMapFocus;
     private showMapContextMenu;
@@ -126,7 +127,9 @@ export declare class Visual implements IVisual {
     private createRegionTooltip;
     private getRegionTooltipRows;
     private getRiskTooltipClass;
+    private getRegionAnalyticsEngine;
     private appendTooltipRow;
+    private appendTooltipUnitRow;
     private removeLeafletMap;
     private appendMapResetButton;
     private appendMapNationalSummary;
@@ -235,6 +238,7 @@ export declare class Visual implements IVisual {
     private formatInteger;
     private formatPercent;
     private formatPercentFromRatio;
+    private formatRoundedPercentFromRatio;
     private calculateProcessingRate;
     private calculateMsPer10k;
     private recordKey;

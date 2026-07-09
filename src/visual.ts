@@ -23,9 +23,12 @@ import VisualUpdateOptions = powerbi.extensibility.visual.VisualUpdateOptions;
 import { VisualFormattingSettingsModel } from "./settings";
 
 type RiskLevel = "Bajo" | "Medio" | "Alto" | "Muy Alto";
+type RiskLabel = RiskLevel | "Sin Clasificación";
 type RiskMapView = "Total" | RiskLevel;
 
 const riskMapViews: RiskMapView[] = ["Total", "Bajo", "Medio", "Alto", "Muy Alto"];
+const neutralTotalRegionFill = "#94a3b8";
+const neutralTotalRegionFillOpacity = 0.34;
 
 interface ColumnIndexes {
     region: number;
@@ -403,7 +406,7 @@ interface RecordKeys {
     distritoLabel: string;
     unidadLabel: string;
     estadoLabel: string;
-    riesgoLabel: RiskLevel;
+    riesgoLabel: RiskLabel;
     colegioLabel: string;
 }
 
@@ -465,39 +468,17 @@ function measure<T>(label: string, fn: () => T): { value: T; ms: number } {
     return { value, ms: end - start };
 }
 
-function getRiskHeatColor(ratio: number): string {
-    if (!Number.isFinite(ratio) || ratio <= 0) {
-        return "#e5e7eb";
-    }
-
-    const clamped = Math.max(0, Math.min(1, ratio));
-
-    if (clamped <= 0.25) {
-        return "#22c55e";
-    }
-
-    if (clamped <= 0.5) {
-        return "#facc15";
-    }
-
-    if (clamped <= 0.75) {
-        return "#fb923c";
-    }
-
-    return "#ef4444";
-}
-
 function getRiskGradientColor(score: number): string {
     if (!Number.isFinite(score) || score < 0) {
         return "#e5e7eb";
     }
 
     const stops = [
-        { at: 0, color: [187, 247, 208] },
-        { at: 0.32, color: [190, 242, 100] },
-        { at: 0.55, color: [253, 224, 71] },
-        { at: 0.78, color: [251, 146, 60] },
-        { at: 1, color: [239, 68, 68] }
+        { at: 0, color: [253, 224, 71] },
+        { at: 0.32, color: [250, 204, 21] },
+        { at: 0.55, color: [251, 146, 60] },
+        { at: 0.78, color: [239, 68, 68] },
+        { at: 1, color: [220, 38, 38] }
     ];
     const clamped = Math.max(0, Math.min(1, score));
 
@@ -868,7 +849,7 @@ class AnalyticsEngine {
         } else if (recordKeys.riesgoLabel === "Alto") {
             bucket.riesgo.alto += 1;
             bucket.riesgoColegios.alto.add(recordKeys.colegioKey);
-        } else {
+        } else if (recordKeys.riesgoLabel === "Muy Alto") {
             bucket.riesgo.muyAlto += 1;
             bucket.riesgoColegios.muyAlto.add(recordKeys.colegioKey);
         }
@@ -1095,7 +1076,7 @@ class AnalyticsEngine {
         };
     }
 
-    private static normalizeRiskLevel(value: PrimitiveValue): RiskLevel {
+    private static normalizeRiskLevel(value: PrimitiveValue): RiskLabel {
         const normalized = AnalyticsEngine.normalizeKey(value).replace(/\s+/g, " ");
 
         if (normalized === "muy alto" || normalized === "muyalto") {
@@ -1110,7 +1091,15 @@ class AnalyticsEngine {
             return "Medio";
         }
 
-        return "Bajo";
+        if (normalized === "bajo") {
+            return "Bajo";
+        }
+
+        if (normalized === "sin clasificación" || normalized === "sinclasificacion" || normalized === "sin clasificacion") {
+            return "Sin Clasificación";
+        }
+
+        return "Sin Clasificación";
     }
 
     private getCriticalPercent(bucket: MetricBucket): number {
@@ -1446,11 +1435,6 @@ export class Visual implements IVisual {
         firstUpdateWaitMs?: number
     ): TableDiagnostics {
         const performanceMetrics: PerformanceMetrics = {
-            updateTotalMs: 0,
-            firstUpdateWaitMs,
-            segmentLoadMs: 0,
-            readDataViewMs: 0,
-            findColumnsMs: 0,
             buildRecordsMs: 0,
             accumulateRowsMs: 0,
             buildAnalyticsEngineMs: 0,
@@ -1468,7 +1452,11 @@ export class Visual implements IVisual {
             analyticsCacheHit: false,
             analyticsRebuilt: false,
             datasetSignature: "",
-            fetchWaitMs
+            fetchWaitMs: fetchWaitMs,
+            updateTotalMs: 0,
+            segmentLoadMs: 0,
+            readDataViewMs: 0,
+            findColumnsMs: 0
         };
 
         const readDataViewResult = measure("readDataView", () => {
@@ -1512,14 +1500,12 @@ export class Visual implements IVisual {
                 ? measure("buildInterimAnalyticsEngine", () => this.incrementalAnalytics || AnalyticsEngine.build(this.accumulatedRows))
                 : null;
             const interimAnalytics = interimAnalyticsResult?.value || null;
-            if (interimAnalyticsResult) {
+                if (interimAnalyticsResult) {
                 performanceMetrics.buildAnalyticsEngineMs = interimAnalyticsResult.ms;
-                performanceMetrics.analyticsRebuilt = true;
-
-                const buildMetrics = interimAnalyticsResult.value.getBuildMetrics();
-                performanceMetrics.buildFlatIndexesMs = buildMetrics.buildFlatIndexesMs;
-                performanceMetrics.buildRelationIndexesMs = buildMetrics.buildRelationIndexesMs;
-                performanceMetrics.lazySampleQueryMs = buildMetrics.lazySampleQueryMs;
+                const interimBuildMetrics = interimAnalyticsResult.value.getBuildMetrics();
+                performanceMetrics.buildFlatIndexesMs = interimBuildMetrics.buildFlatIndexesMs;
+                performanceMetrics.buildRelationIndexesMs = interimBuildMetrics.buildRelationIndexesMs;
+                performanceMetrics.lazySampleQueryMs = interimBuildMetrics.lazySampleQueryMs;
             }
 
             return {
@@ -2455,7 +2441,7 @@ export class Visual implements IVisual {
 
                 layer.bindTooltip(this.createRegionTooltip(regionName, aggregate), {
                     sticky: true,
-                    direction: "top",
+                    direction: "auto",
                     opacity: 0.95,
                     className: "region-leaflet-tooltip"
                 });
@@ -2508,8 +2494,19 @@ export class Visual implements IVisual {
         const focusBounds = focusLayer && "getBounds" in focusLayer
             ? focusLayer.getBounds()
             : geoJsonLayer.getBounds();
-        map.fitBounds(focusBounds, { padding: [20, 20] });
+        map.fitBounds(focusBounds, this.getMapFitBoundsOptions());
         map.invalidateSize();
+    }
+
+    private getMapFitBoundsOptions(): L.FitBoundsOptions {
+        if (this.selectedRiskView !== "Total") {
+            return {
+                paddingTopLeft: [18, 24],
+                paddingBottomRight: [330, 28]
+            };
+        }
+
+        return { padding: [20, 20] };
     }
 
     private getAutoFocusedRegion(engine: AnalyticsEngine): string | null {
@@ -2548,8 +2545,6 @@ export class Visual implements IVisual {
         menu.style.top = `${event.containerPoint.y}px`;
 
         [
-            { label: "Ver Provincias", mode: "provincias" as MapDrillMode },
-            { label: "Ver Distritos", mode: "distritos" as MapDrillMode },
             { label: "Ver Colegios", mode: "colegios" as MapDrillMode }
         ].forEach((option: { label: string; mode: MapDrillMode }) => {
             const button = document.createElement("button");
@@ -2723,7 +2718,9 @@ export class Visual implements IVisual {
 
         return {
             fillColor,
-            fillOpacity: selected ? 0.82 : 0.68,
+            fillOpacity: this.selectedRiskView === "Total"
+                ? (selected ? 0.48 : neutralTotalRegionFillOpacity)
+                : (selected ? 0.82 : 0.68),
             weight: selected ? 4 : 1.8,
             color: selected ? "#0f172a" : "#ffffff",
             opacity: 1
@@ -2745,10 +2742,7 @@ export class Visual implements IVisual {
         }
 
         if (this.selectedRiskView === "Total") {
-            const ratio = mapHeatScale.maxTotalColegios
-                ? aggregate.totalColegios / mapHeatScale.maxTotalColegios
-                : 0;
-            return getRiskHeatColor(ratio);
+            return neutralTotalRegionFill;
         }
 
         const percentage = this.getSelectedRiskPercentage(aggregate);
@@ -2827,9 +2821,45 @@ export class Visual implements IVisual {
         title.textContent = aggregate?.region || regionName;
         tooltip.appendChild(title);
 
+        const columns = document.createElement("div");
+        columns.className = "region-tooltip-columns";
+
+        const leftColumn = document.createElement("div");
+        leftColumn.className = "region-tooltip-column";
+
+        const leftTitle = document.createElement("strong");
+        leftTitle.className = "region-tooltip-column-title";
+        leftTitle.innerHTML = "Nivel de Riesgo<br/>por I.E.";
+        leftColumn.appendChild(leftTitle);
+
         this.getRegionTooltipRows(aggregate).forEach(([label, value, className]: string[]) => {
-            this.appendTooltipRow(tooltip, label, value, className);
+            this.appendTooltipRow(leftColumn, label, value, className);
         });
+        columns.appendChild(leftColumn);
+
+        const regionAnalytics = this.getRegionAnalyticsEngine(regionName);
+        const rightColumn = document.createElement("div");
+        rightColumn.className = "region-tooltip-column";
+
+        const unitsTitle = document.createElement("strong");
+        unitsTitle.className = "region-tooltip-column-title";
+        unitsTitle.innerHTML = "Intervenciones<br/>PRONIED";
+        rightColumn.appendChild(unitsTitle);
+
+        if (regionAnalytics) {
+            const unitOrder: UnitKpiName[] = ["UGRD", "UGM", "UGEO", "UGME", "UGSC"];
+            const unitMap = new Map(regionAnalytics.getUnitKpis().map((kpi: UnitKpiSummary) => [kpi.unit, kpi]));
+
+            unitOrder.forEach((unit: UnitKpiName) => {
+                const kpi = unitMap.get(unit);
+                if (kpi) {
+                    this.appendTooltipUnitRow(rightColumn, unit, this.formatInteger(kpi.colegios));
+                }
+            });
+        }
+
+        columns.appendChild(rightColumn);
+        tooltip.appendChild(columns);
 
         return tooltip;
     }
@@ -2844,18 +2874,25 @@ export class Visual implements IVisual {
 
             return [
                 ["N° Colegios Totales", this.formatInteger(totalColegios), "region-tooltip-row-main"],
-                [`N° Colegios - Riesgo ${this.selectedRiskView}`, this.formatInteger(selectedRiskCount), this.getRiskTooltipClass(this.selectedRiskView)],
+                [`Riesgo ${this.selectedRiskView}`, this.formatInteger(selectedRiskCount), this.getRiskTooltipClass(this.selectedRiskView)],
                 ["Porcentaje", this.formatPercentFromRatio(this.getSelectedRiskPercentage(aggregate)), "region-tooltip-percent"]
             ];
         }
 
+        const riskCount = (aggregate?.riskBreakdown.bajo || 0)
+            + (aggregate?.riskBreakdown.medio || 0)
+            + (aggregate?.riskBreakdown.alto || 0)
+            + (aggregate?.riskBreakdown.muyAlto || 0);
+        const unclassified = Math.max(0, totalColegios - riskCount);
+
         return [
             ["N° Colegios Totales", this.formatInteger(totalColegios), "region-tooltip-row-main"],
             ["N° Provincias", this.formatInteger(aggregate?.totalProvincias || 0), "region-tooltip-row-main"],
-            ["N° Colegios - Riesgo Bajo", this.formatInteger(aggregate?.riskBreakdown.bajo || 0), "risk-low"],
-            ["N° Colegios - Riesgo Medio", this.formatInteger(aggregate?.riskBreakdown.medio || 0), "risk-medium"],
-            ["N° Colegios - Riesgo Alto", this.formatInteger(aggregate?.riskBreakdown.alto || 0), "risk-high"],
-            ["N° Colegios - Riesgo Muy Alto", this.formatInteger(aggregate?.riskBreakdown.muyAlto || 0), "risk-critical"]
+            ["Riesgo Bajo", this.formatInteger(aggregate?.riskBreakdown.bajo || 0), "risk-low"],
+            ["Riesgo Medio", this.formatInteger(aggregate?.riskBreakdown.medio || 0), "risk-medium"],
+            ["Riesgo Alto", this.formatInteger(aggregate?.riskBreakdown.alto || 0), "risk-high"],
+            ["Riesgo Muy Alto", this.formatInteger(aggregate?.riskBreakdown.muyAlto || 0), "risk-critical"],
+            ["Sin Clasificación", this.formatInteger(unclassified), "risk-unknown"]
         ];
     }
 
@@ -2875,12 +2912,42 @@ export class Visual implements IVisual {
         return "risk-critical";
     }
 
+    private getRegionAnalyticsEngine(regionName: string): AnalyticsEngine | null {
+        const regionKey = this.normalizeRegionForMap(regionName);
+        return this.streamingIndexes.regionAnalytics.get(regionKey) || null;
+    }
+
     private appendTooltipRow(tooltip: HTMLElement, label: string, value: string, className = ""): void {
         const row = document.createElement("div");
         row.className = `region-tooltip-row ${className}`.trim();
         const labelElement = document.createElement("span");
         labelElement.textContent = label;
         row.appendChild(labelElement);
+
+        const valueElement = document.createElement("b");
+        valueElement.textContent = value;
+        row.appendChild(valueElement);
+        tooltip.appendChild(row);
+    }
+
+    private appendTooltipUnitRow(tooltip: HTMLElement, unit: UnitKpiName, value: string): void {
+        const row = document.createElement("div");
+        row.className = "region-tooltip-row";
+
+        const labelWrapper = document.createElement("span");
+        labelWrapper.className = "region-tooltip-unit-label";
+
+        const iconWrapper = document.createElement("span");
+        iconWrapper.className = `region-tooltip-unit-icon unit-icon-${unit.toLowerCase()}`;
+        this.appendIconSvg(iconWrapper, this.getUnitTheme(unit).icon);
+        labelWrapper.appendChild(iconWrapper);
+
+        const text = document.createElement("span");
+        text.className = "region-tooltip-unit-text";
+        text.textContent = unit;
+        labelWrapper.appendChild(text);
+
+        row.appendChild(labelWrapper);
 
         const valueElement = document.createElement("b");
         valueElement.textContent = value;
@@ -2951,6 +3018,10 @@ export class Visual implements IVisual {
     }
 
     private appendMapRankingControl(map: HTMLElement, engine: AnalyticsEngine): void {
+        if (this.selectedRiskView === "Total") {
+            return;
+        }
+
         const panel = document.createElement("aside");
         panel.className = "map-ranking-card";
 
@@ -2977,14 +3048,14 @@ export class Visual implements IVisual {
         panel.appendChild(header);
 
         const hint = document.createElement("small");
-        hint.textContent = this.selectedRiskView === "Total"
-            ? "Selecciona un riesgo"
-            : `Top por % ${this.selectedRiskView}`;
+        hint.textContent = `% Riesgo ${this.selectedRiskView}`;
         panel.appendChild(hint);
 
         const list = document.createElement("ol");
         list.className = "map-ranking-list";
-        this.getMapRankingRows(engine).forEach((row: { region: string; percentage: number; score: number }) => {
+        const rankingRows = this.getMapRankingRows(engine);
+        panel.style.setProperty("--ranking-list-height", `${Math.max(1, rankingRows.length) * 24}px`);
+        rankingRows.forEach((row: { region: string; percentage: number; score: number }) => {
             const item = document.createElement("li");
 
             const swatch = document.createElement("span");
@@ -2992,11 +3063,12 @@ export class Visual implements IVisual {
             item.appendChild(swatch);
 
             const label = document.createElement("b");
-            label.textContent = this.shortRegionLabel(row.region);
+            label.textContent = row.region;
+            label.title = row.region;
             item.appendChild(label);
 
             const value = document.createElement("em");
-            value.textContent = this.formatPercentFromRatio(row.percentage);
+            value.textContent = this.formatRoundedPercentFromRatio(row.percentage);
             item.appendChild(value);
             list.appendChild(item);
         });
@@ -3407,11 +3479,6 @@ export class Visual implements IVisual {
         const header = document.createElement("div");
         header.className = "unit-card-header";
 
-        const icon = document.createElement("div");
-        icon.className = "unit-card-icon";
-        this.appendIconSvg(icon, theme.icon);
-        header.appendChild(icon);
-
         const titleGroup = document.createElement("div");
         titleGroup.className = "unit-card-title-group";
 
@@ -3516,7 +3583,7 @@ export class Visual implements IVisual {
                 color: "#f97316",
                 background: "#fff7ed",
                 icon: "shield",
-                name: "Unidad Gerencial de Reconstruccion y Descentralizacion"
+                name: "Unidad Gerencial de Reconstrucción frente a Desastres"
             },
             UGSC: {
                 color: "#7c3aed",
@@ -4703,7 +4770,7 @@ export class Visual implements IVisual {
         return this.normalizeRiskLevelForFilter(row.nivelRiesgo) === this.selectedRiskView;
     }
 
-    private normalizeRiskLevelForFilter(value: PrimitiveValue): RiskLevel {
+    private normalizeRiskLevelForFilter(value: PrimitiveValue): RiskLabel {
         const normalized = this.normalizeText(value)
             .replace(/\s+/g, " ")
             .trim();
@@ -4720,7 +4787,11 @@ export class Visual implements IVisual {
             return "Medio";
         }
 
-        return "Bajo";
+        if (normalized === "BAJO" || normalized.includes("BAJO")) {
+            return "Bajo";
+        }
+
+        return "Sin Clasificación";
     }
 
     private getDetailColumns(unit: UnitKpiName): DetailColumn[] {
@@ -5230,19 +5301,25 @@ export class Visual implements IVisual {
     }
 
     private formatCurrencyNoDecimals(value: number): string {
-        return `S/ ${value.toLocaleString(undefined, {
+        const amount = Number.isFinite(value) ? value : 0;
+
+        if (amount >= 1_000_000) {
+            const millions = Math.floor(amount / 1_000_000);
+            const formattedMillions = millions.toLocaleString("en-US", {
+                maximumFractionDigits: 0,
+                minimumFractionDigits: 0
+            });
+            return `S/ ${formattedMillions} M`;
+        }
+
+        return `S/ ${amount.toLocaleString("en-US", {
             maximumFractionDigits: 0,
             minimumFractionDigits: 0
         })}`;
     }
 
     private formatMillions(value: number): string {
-        const millions = value / 1_000_000;
-
-        return `S/ ${millions.toLocaleString("es-PE", {
-            maximumFractionDigits: 0,
-            minimumFractionDigits: 0
-        })} M`;
+        return this.formatCurrencyNoDecimals(value);
     }
 
     private formatDecimal(value: number): string {
@@ -5268,6 +5345,14 @@ export class Visual implements IVisual {
         }
 
         return `${(value * 100).toFixed(2)}%`;
+    }
+
+    private formatRoundedPercentFromRatio(value: number): string {
+        if (!Number.isFinite(value)) {
+            return "0%";
+        }
+
+        return `${Math.round(value * 100)}%`;
     }
 
     private calculateProcessingRate(rowCount: number, updateTotalMs: number): number {

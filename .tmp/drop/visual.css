@@ -698,7 +698,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 .data-view-diagnostic .internal-filter-label {
   color: #475569;
   display: block;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 900;
   letter-spacing: 0;
   line-height: 1;
@@ -778,7 +778,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 }
 .data-view-diagnostic .internal-filter-search span {
   color: #2563eb;
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1;
   text-align: center;
 }
@@ -787,7 +787,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
   border: 0;
   color: #0f172a;
   font-family: inherit;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 800;
   height: 24px;
   min-width: 0;
@@ -933,7 +933,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
   border-radius: 8px;
   color: #2563eb;
   display: flex;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 900;
   height: 34px;
   justify-content: center;
@@ -950,7 +950,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 .data-view-diagnostic .information-metric-card small {
   color: #525252;
   display: block;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 900;
   line-height: 1.15;
   margin-top: 3px;
@@ -1112,25 +1112,29 @@ svg.leaflet-image-layer.leaflet-interactive path {
   background: rgba(255, 255, 255, 0.96);
   border: 1px solid #cbd5e1;
   border-radius: 8px;
+  box-sizing: border-box;
   box-shadow: 0 12px 26px rgba(15, 23, 42, 0.16);
-  max-height: 248px;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100% - 32px);
+  overflow: hidden;
   padding: 10px;
   position: absolute;
   right: 12px;
   top: 12px;
-  width: 204px;
+  width: 308px;
   z-index: 12;
 }
 .data-view-diagnostic .map-ranking-header {
   align-items: center;
   display: grid;
   gap: 8px;
-  grid-template-columns: minmax(0, 1fr) 46px;
+  grid-template-columns: minmax(0, 1fr) 58px;
   margin-bottom: 4px;
 }
 .data-view-diagnostic .map-ranking-header strong {
   color: #0f172a;
-  font-size: 13px;
+  font-size: 16px;
   font-weight: 900;
   line-height: 1;
 }
@@ -1138,17 +1142,17 @@ svg.leaflet-image-layer.leaflet-interactive path {
   border: 1px solid #cbd5e1;
   border-radius: 6px;
   color: #0f172a;
-  font-size: 13px;
+  font-size: 16px;
   font-weight: 800;
-  height: 26px;
+  height: 32px;
   padding: 2px 4px;
   text-align: center;
-  width: 46px;
+  width: 58px;
 }
 .data-view-diagnostic .map-ranking-card > small {
   color: #64748b;
   display: block;
-  font-size: 11.5px;
+  font-size: 14px;
   font-weight: 800;
   margin-bottom: 6px;
 }
@@ -1157,16 +1161,18 @@ svg.leaflet-image-layer.leaflet-interactive path {
   gap: 5px;
   list-style: none;
   margin: 0;
-  max-height: 176px;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
   padding: 0;
+  scrollbar-gutter: stable;
 }
 .data-view-diagnostic .map-ranking-list li {
   align-items: center;
   display: grid;
-  gap: 6px;
-  grid-template-columns: 12px minmax(0, 1fr) auto;
-  min-height: 20px;
+  gap: 8px;
+  grid-template-columns: 12px minmax(0, 1fr) 42px;
+  min-height: 24px;
 }
 .data-view-diagnostic .map-ranking-list span {
   border: 1px solid rgba(15, 23, 42, 0.18);
@@ -1177,7 +1183,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 }
 .data-view-diagnostic .map-ranking-list b {
   color: #0f172a;
-  font-size: 12px;
+  font-size: 15px;
   font-weight: 800;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1185,9 +1191,11 @@ svg.leaflet-image-layer.leaflet-interactive path {
 }
 .data-view-diagnostic .map-ranking-list em {
   color: #334155;
-  font-size: 12px;
+  font-size: 15px;
   font-style: normal;
   font-weight: 800;
+  padding-right: 6px;
+  text-align: right;
   white-space: nowrap;
 }
 .data-view-diagnostic .map-reset-button {
@@ -1219,11 +1227,11 @@ svg.leaflet-image-layer.leaflet-interactive path {
   border-top: 1px solid #dbeafe;
   bottom: 0;
   display: flex;
-  gap: 9px;
+  gap: 10px;
   left: 0;
-  min-height: 52px;
+  min-height: 58px;
   overflow-x: auto;
-  padding: 8px 10px;
+  padding: 10px 12px;
   position: absolute;
   right: 0;
   z-index: 710;
@@ -1231,7 +1239,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 .data-view-diagnostic .map-risk-toggle span {
   color: #0f172a;
   flex: 0 0 auto;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 900;
 }
 .data-view-diagnostic .map-risk-toggle-button {
@@ -1241,10 +1249,10 @@ svg.leaflet-image-layer.leaflet-interactive path {
   color: #0f172a;
   cursor: pointer;
   flex: 0 0 auto;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 900;
-  min-height: 34px;
-  padding: 8px 14px;
+  min-height: 38px;
+  padding: 9px 16px;
 }
 .data-view-diagnostic .map-risk-toggle-button-active {
   background: #2563eb;
@@ -1269,9 +1277,9 @@ svg.leaflet-image-layer.leaflet-interactive path {
   border-bottom: 1px solid #e2e8f0;
   color: #0f172a;
   cursor: pointer;
-  font-size: 11px;
+  font-size: 15px;
   font-weight: 800;
-  padding: 9px 11px;
+  padding: 10px 13px;
   text-align: left;
 }
 .data-view-diagnostic .map-context-menu button:last-child {
@@ -1310,12 +1318,12 @@ svg.leaflet-image-layer.leaflet-interactive path {
 }
 .data-view-diagnostic .region-leaflet-tooltip {
   background: #ffffff;
-  border: 1px solid #cbd5e1;
-  border-radius: 8px;
-  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.22);
+  border: 1px solid #d1d5db;
+  border-radius: 12px;
+  box-shadow: 0 20px 40px rgba(15, 23, 42, 0.18);
   color: #0f172a;
-  max-width: 190px;
-  min-width: 180px;
+  max-width: 760px;
+  min-width: 560px;
   padding: 0;
   white-space: normal;
 }
@@ -1323,37 +1331,61 @@ svg.leaflet-image-layer.leaflet-interactive path {
   display: none;
 }
 .data-view-diagnostic .region-tooltip-content {
-  padding: 9px 10px;
-  width: 180px;
+  padding: 14px 18px;
+  width: auto;
+  min-width: 720px;
+  max-width: 980px;
+}
+.data-view-diagnostic .region-tooltip-columns {
+  display: grid;
+  gap: 28px;
+  grid-template-columns: 1.4fr 1.2fr;
+}
+.data-view-diagnostic .region-tooltip-column {
+  display: grid;
+  gap: 6px;
+}
+.data-view-diagnostic .region-tooltip-column-title {
+  color: #475569;
+  display: block;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1.1;
+  margin-bottom: 10px;
+  text-transform: uppercase;
+  white-space: pre-wrap;
+  text-align: center;
 }
 .data-view-diagnostic .region-leaflet-tooltip strong,
 .data-view-diagnostic .region-tooltip-title {
   border-bottom: 1px solid #e2e8f0;
   color: #0f172a;
   display: block;
-  font-size: 12.5px;
-  font-weight: 800;
-  line-height: 1.2;
-  margin: 0 0 7px;
+  font-size: 22px;
+  font-weight: 900;
+  line-height: 1.15;
+  margin: 0 0 10px;
   overflow: hidden;
-  padding-bottom: 7px;
+  padding-bottom: 8px;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-align: center;
 }
 .data-view-diagnostic .region-tooltip-row {
   align-items: center;
   display: grid;
   gap: 10px;
   grid-template-columns: minmax(0, 1fr) auto;
-  min-height: 20px;
-  padding: 2px 0;
+  min-height: 28px;
+  padding: 4px 0;
 }
 .data-view-diagnostic .region-leaflet-tooltip span,
 .data-view-diagnostic .region-tooltip-row span {
   color: #475569;
-  font-size: 11.5px;
+  font-size: 18px;
   font-weight: 700;
-  line-height: 1.15;
+  line-height: 1.3;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1362,16 +1394,65 @@ svg.leaflet-image-layer.leaflet-interactive path {
 .data-view-diagnostic .region-leaflet-tooltip b,
 .data-view-diagnostic .region-tooltip-row b {
   color: #0f172a;
-  font-size: 12px;
-  font-weight: 800;
+  font-size: 18px;
+  font-weight: 850;
   text-align: right;
   white-space: nowrap;
 }
 .data-view-diagnostic .region-tooltip-row-main {
   background: #f8fafc;
+  border-radius: 8px;
+  margin: 4px 0;
+  padding: 8px 10px;
+}
+.data-view-diagnostic .region-tooltip-unit-label {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.data-view-diagnostic .region-tooltip-unit-icon {
+  align-items: center;
+  background: #eef2ff;
   border-radius: 6px;
-  margin: 2px 0;
-  padding: 4px 6px;
+  display: inline-flex;
+  height: 26px;
+  justify-content: center;
+  width: 26px;
+}
+.data-view-diagnostic .region-tooltip-unit-icon svg {
+  height: 14px;
+  width: 14px;
+  fill: currentColor;
+}
+.data-view-diagnostic .region-tooltip-unit-icon.unit-icon-ugrd {
+  color: #f97316;
+  background: #fff7ed;
+}
+.data-view-diagnostic .region-tooltip-unit-icon.unit-icon-ugsc {
+  color: #7c3aed;
+  background: #f5f3ff;
+}
+.data-view-diagnostic .region-tooltip-unit-icon.unit-icon-ugeo {
+  color: #2563eb;
+  background: #eff6ff;
+}
+.data-view-diagnostic .region-tooltip-unit-icon.unit-icon-ugm {
+  color: #16a34a;
+  background: #f0fdf4;
+}
+.data-view-diagnostic .region-tooltip-unit-icon.unit-icon-ugme {
+  color: #0891b2;
+  background: #ecfeff;
+}
+.data-view-diagnostic .region-tooltip-unit-text {
+  color: #0f172a;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
 }
 .data-view-diagnostic .region-tooltip-percent {
   border-top: 1px solid #e2e8f0;
@@ -1381,7 +1462,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 .data-view-diagnostic .region-tooltip-percent span,
 .data-view-diagnostic .region-tooltip-percent b {
   color: #0f172a;
-  font-size: 12px;
+  font-size: 15px;
   font-weight: 900;
 }
 .data-view-diagnostic .risk-low span {
@@ -1424,29 +1505,11 @@ svg.leaflet-image-layer.leaflet-interactive path {
   align-items: center;
   display: grid;
   gap: 10px;
-  grid-template-columns: 46px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   margin-bottom: 11px;
   min-height: 46px;
-}
-.data-view-diagnostic .unit-card-icon {
-  align-items: center;
-  background: var(--unit-color);
-  border-radius: 8px;
-  box-shadow: 0 10px 20px color-mix(in srgb, var(--unit-color) 24%, transparent);
-  color: #ffffff;
-  display: flex;
-  height: 46px;
-  justify-content: center;
-  width: 46px;
-}
-.data-view-diagnostic .unit-card-icon svg {
-  fill: none;
-  height: 25px;
-  stroke: currentColor;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 2.3;
-  width: 25px;
+  padding-left: 8px;
+  padding-right: 4px;
 }
 .data-view-diagnostic .unit-card-title-group {
   min-width: 0;
@@ -1456,11 +1519,11 @@ svg.leaflet-image-layer.leaflet-interactive path {
   font-size: 24px;
   font-weight: 900;
   line-height: 1;
-  margin: 0 0 3px;
+  margin: 0 0 8px;
 }
 .data-view-diagnostic .unit-card-subtitle {
-  color: #0f172a;
-  font-size: 12.5px;
+  color: #64748b;
+  font-size: 17px;
   font-weight: 800;
   line-height: 1.12;
   overflow-wrap: anywhere;
@@ -1470,7 +1533,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
   border: 0;
   color: var(--unit-color);
   cursor: pointer;
-  font-size: 10px;
+  font-size: 12.5px;
   font-weight: 900;
   padding: 2px 0;
   white-space: nowrap;
@@ -1535,11 +1598,11 @@ svg.leaflet-image-layer.leaflet-interactive path {
   overflow-wrap: anywhere;
 }
 .data-view-diagnostic .unit-kpi-label {
-  color: #0f172a;
-  font-size: 12px;
+  color: #64748b;
+  font-size: 15px;
   font-weight: 900;
   line-height: 1.05;
-  margin-top: 2px;
+  margin-top: 6px;
   overflow-wrap: anywhere;
 }
 .data-view-diagnostic .floating-next-button {
